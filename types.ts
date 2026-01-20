@@ -56,6 +56,17 @@ export interface ProcessingState {
   progress: number; // 0 to 100
 }
 
+export interface BatchItem {
+    id: string;
+    fileName: string;
+    originalFile?: File; // Optional if from search
+    subtitles: SubtitleLine[];
+    status: 'pending' | 'translating' | 'completed' | 'error';
+    progress: number;
+    message?: string;
+    context?: string; // Specific context for this file
+}
+
 export enum TabView {
   UPLOAD = 'UPLOAD',
   SEARCH = 'SEARCH',
@@ -74,4 +85,6 @@ export interface AssStyleConfig {
     };
     outlineWidth: number;
     shadowDepth: number;
+    borderStyle: 1 | 3; // 1=Outline+Shadow, 3=Opaque Box
+    fontFamily: string;
 }
