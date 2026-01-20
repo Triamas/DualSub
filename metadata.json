@@ -1,0 +1,5 @@
+{
+  "name": "DualSub AI",
+  "description": "Retrieve or upload English subtitles, translate them to Vietnamese using Gemini AI, and generate professional dual-language .ass subtitle files.",
+  "requestFramePermissions": []
+}
