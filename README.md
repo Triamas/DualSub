@@ -8,37 +8,35 @@ DualSub AI is a modern web application designed to create professional dual-lang
 - **Engine**: Powered by Google Gemini (`gemini-3-flash-preview`).
 - **Context-Aware**: Generates translation context based on filenames to ensure correct tone and pronoun usage (specifically optimized for Vietnamese pronouns).
 - **Length Control**: Intelligent retry logic ensures translations fit within readable time constraints, condensing text when necessary.
+- **Batch Processing**: Upload and translate multiple subtitle files simultaneously with a visual queue and ZIP export.
 
 ### 🔍 Integrated Subtitle Search
 - **Providers**: Native support for **OpenSubtitles** and **Subdl**.
 - **Security**: API keys for subtitle providers are stored securely in your browser's LocalStorage and are masked in the UI.
-- **External Links**: Quick access to manual search on Subscene, Addic7ed, YIFY, and more.
+- **External Links**: Quick access to manual search on Addic7ed, TVsubtitles, YIFY, and more.
 
 ### 🎨 Advanced Styling & Formatting
 - **Dual-Language Layouts**:
   - **Stacked**: Both languages at the bottom (e.g., Translation above Original).
   - **Split**: One language at the top, one at the bottom.
-- **Customization**: Granular control over font colors, sizes, and vertical stacking order.
+- **Style Presets**: Instantly apply professional styles including **Netflix**, **Anime**, **Cinematic**, and **Kodi/TV** defaults.
+- **Typography**: Select from standard media player fonts (Arial, Teletext, Trebuchet, etc.) with granular control over colors, sizes, and shadows.
 - **Timing Optimization**: Algorithms to prevent subtitle overlap and ensure minimum display durations.
-
-### ⚡ Performance
-- **Batch Processing**: Handles large subtitle files efficiently using concurrent requests.
-- **Resume Capability**: Skips already translated lines if the process is paused.
 
 ## Usage Guide
 
 1.  **Load Subtitles**:
-    -   Navigate to **Upload File** to use a local `.srt` file.
+    -   Navigate to **Upload & Batch** to drop one or multiple `.srt` files.
     -   Or use **Search Subtitles** to find and download subtitles directly within the app.
 2.  **Configure Translation**:
     -   Select your **Target Language** (e.g., Vietnamese, Spanish, German).
-    -   Use the **Auto-Detect** button to let AI summarize the movie plot/context for better translation accuracy.
+    -   Check **Auto-Detect Context** to let AI analyze the filename for better accuracy.
 3.  **Translate**:
-    -   Click **Translate** to start. You can monitor progress in real-time.
+    -   Click **Translate All Pending** to start the batch queue. You can monitor progress for each file in real-time.
 4.  **Style & Export**:
-    -   Click the **Settings** (slider icon) to adjust colors and layout.
+    -   Click the **Settings** (slider icon) to adjust colors, fonts, and layout, or pick a Preset.
     -   Preview the result in the embedded viewer.
-    -   Click **Download .ass File** to save your dual-language subtitles.
+    -   Click **Download .ass File** (or Download All for ZIPs) to save your dual-language subtitles.
 
 ## Player Support
 
@@ -46,6 +44,7 @@ The generated `.ass` files allow for complex formatting that standard `.srt` fil
 - **Windows**: VLC, MPC-HC, PotPlayer.
 - **macOS**: IINA, VLC.
 - **Linux**: MPV, VLC.
+- **Android/TV**: Kodi, Nova Video Player, VLC.
 
 ## API Configuration
 
