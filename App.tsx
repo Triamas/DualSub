@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Search as SearchIcon, Info, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Search as SearchIcon, Info, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor } from 'lucide-react';
 import { SubtitleLine, ProcessingState, TabView, AssStyleConfig } from './types';
 import { parseSRT, generateASS, downloadFile } from './services/subtitleUtils';
 import { translateBatch, generateContext } from './services/geminiService';
@@ -28,7 +28,9 @@ const DEFAULT_CONFIG: AssStyleConfig = {
     secondary: {
         color: '#FFFFFF', // White
         fontSize: 64
-    }
+    },
+    outlineWidth: 2,
+    shadowDepth: 0
 };
 
 function App() {
@@ -66,6 +68,23 @@ function App() {
 
   const resetStyles = () => {
       setStyleConfig(DEFAULT_CONFIG);
+  };
+
+  const applyKodiPreset = () => {
+      setStyleConfig({
+          layout: 'stacked',
+          stackOrder: 'primary-top',
+          primary: {
+              color: '#FFFF00',
+              fontSize: 84 // Larger for TV
+          },
+          secondary: {
+              color: '#FFFFFF',
+              fontSize: 72 // Larger for TV
+          },
+          outlineWidth: 4, // Thicker outline for HDR/TV
+          shadowDepth: 2 // Slight drop shadow for depth
+      });
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -217,8 +236,16 @@ function App() {
 
   const handleDownloadASS = () => {
     const assContent = generateASS(subtitles, styleConfig);
-    const newFileName = fileName.replace('.srt', '') + '.dual.ass';
-    downloadFile(assContent, newFileName);
+    // Kodi friendly naming: If we have a clean filename, prefer keeping it simple so Kodi auto-detects.
+    // However, usually 'movie.ass' in the same folder as 'movie.mkv' works best.
+    let newFileName = fileName;
+    if (newFileName.toLowerCase().endsWith('.srt')) {
+        newFileName = newFileName.substring(0, newFileName.length - 4);
+    }
+    // Remove .en or .eng if present to make it the 'base' subtitle if desired, 
+    // but typically appending language code is safer.
+    // We will append .ass.
+    downloadFile(assContent, newFileName + '.ass');
   };
 
   return (
@@ -413,13 +440,22 @@ function App() {
                                         <Palette className="w-4 h-4 text-yellow-500" />
                                         Customize Subtitle Appearance
                                     </h3>
-                                    <button 
-                                        onClick={resetStyles}
-                                        className="text-xs flex items-center gap-1.5 text-zinc-400 hover:text-white transition-colors px-2 py-1 rounded bg-zinc-800"
-                                        title="Reset to recommended defaults"
-                                    >
-                                        <RotateCcw className="w-3 h-3" /> Reset Default
-                                    </button>
+                                    <div className="flex gap-2">
+                                        <button 
+                                            onClick={applyKodiPreset}
+                                            className="text-xs flex items-center gap-1.5 text-zinc-900 font-bold hover:bg-yellow-400 transition-colors px-2 py-1 rounded bg-yellow-500"
+                                            title="Optimize settings for Kodi/TV (Large text, high contrast)"
+                                        >
+                                            <Monitor className="w-3 h-3" /> TV / Kodi Mode
+                                        </button>
+                                        <button 
+                                            onClick={resetStyles}
+                                            className="text-xs flex items-center gap-1.5 text-zinc-400 hover:text-white transition-colors px-2 py-1 rounded bg-zinc-800"
+                                            title="Reset to recommended defaults"
+                                        >
+                                            <RotateCcw className="w-3 h-3" /> Reset Default
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -454,6 +490,33 @@ function App() {
                                                 <ArrowUpDown className="w-4 h-4" />
                                             </button>
                                         </div>
+
+                                        <div className="space-y-4 pt-2 border-t border-zinc-800">
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between">
+                                                    <span className="text-xs text-zinc-400">Outline Width</span>
+                                                    <span className="text-xs text-zinc-500">{styleConfig.outlineWidth}px</span>
+                                                </div>
+                                                <input 
+                                                    type="range" min="0" max="10" step="1"
+                                                    value={styleConfig.outlineWidth}
+                                                    onChange={(e) => setStyleConfig({...styleConfig, outlineWidth: parseInt(e.target.value)})}
+                                                    className="w-full accent-zinc-500 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
+                                                />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between">
+                                                    <span className="text-xs text-zinc-400">Shadow Depth</span>
+                                                    <span className="text-xs text-zinc-500">{styleConfig.shadowDepth}px</span>
+                                                </div>
+                                                <input 
+                                                    type="range" min="0" max="10" step="1"
+                                                    value={styleConfig.shadowDepth}
+                                                    onChange={(e) => setStyleConfig({...styleConfig, shadowDepth: parseInt(e.target.value)})}
+                                                    className="w-full accent-zinc-500 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
 
                                     {/* Styling Section */}
@@ -474,7 +537,7 @@ function App() {
                                             <div className="flex items-center gap-3">
                                                 <span className="text-xs text-zinc-500 w-12">Size: {styleConfig.primary.fontSize}</span>
                                                 <input 
-                                                    type="range" min="30" max="100" step="2"
+                                                    type="range" min="30" max="120" step="2"
                                                     value={styleConfig.primary.fontSize}
                                                     onChange={(e) => setStyleConfig({...styleConfig, primary: {...styleConfig.primary, fontSize: parseInt(e.target.value)}})}
                                                     className="flex-1 accent-yellow-500 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
@@ -496,7 +559,7 @@ function App() {
                                             <div className="flex items-center gap-3">
                                                 <span className="text-xs text-zinc-500 w-12">Size: {styleConfig.secondary.fontSize}</span>
                                                 <input 
-                                                    type="range" min="30" max="100" step="2"
+                                                    type="range" min="30" max="120" step="2"
                                                     value={styleConfig.secondary.fontSize}
                                                     onChange={(e) => setStyleConfig({...styleConfig, secondary: {...styleConfig.secondary, fontSize: parseInt(e.target.value)}})}
                                                     className="flex-1 accent-zinc-500 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer"

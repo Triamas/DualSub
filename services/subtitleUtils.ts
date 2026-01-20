@@ -131,9 +131,6 @@ const toAssColor = (hex: string, alpha: number = 0): string => {
     const g = cleanHex.substring(2, 4);
     const b = cleanHex.substring(4, 6);
     // ASS Alpha: 00 = Opaque, FF = Transparent
-    // Input alpha: 0.0 (Transparent) -> 1.0 (Opaque) wait, usually alpha input 0-1 means opacity in CSS.
-    // Let's assume input 'alpha' is Opacity (0 to 1). 
-    // So 1 = 00 (Opaque), 0 = FF (Transparent).
     const alphaVal = Math.floor((1 - alpha) * 255).toString(16).padStart(2, '0').toUpperCase();
     return `&H${alphaVal}${b}${g}${r}`;
 };
@@ -144,65 +141,70 @@ const toAssColor = (hex: string, alpha: number = 0): string => {
 export const generateASS = (subtitles: SubtitleLine[], config: AssStyleConfig): string => {
   const optimizedSubtitles = optimizeTimings(subtitles);
 
-  const primaryColorAss = toAssColor(config.primary.color, 1); // 100% opacity
-  const secondaryColorAss = toAssColor(config.secondary.color, 1); // User manages opacity via color choice or we could add specific opacity controls later
+  const primaryColorAss = toAssColor(config.primary.color, 1); 
+  const secondaryColorAss = toAssColor(config.secondary.color, 1); 
 
-  // Configurable Font Sizes
   const primSize = config.primary.fontSize;
   const secSize = config.secondary.fontSize;
+  
+  const outline = config.outlineWidth;
+  const shadow = config.shadowDepth;
 
   // Margin Calculation based on Stack Order
   let primMarginV = 80;
   let secMarginV = 40;
   
   if (config.layout === 'stacked') {
-      // If Primary is Top, it gets the higher margin (80).
-      // If Secondary is Top, IT gets the higher margin (80).
+      // Logic for stacked margins
+      // To ensure they don't overlap, we need to respect the font size approx
+      // But standard ASS renderers handle collision fairly well if we use Top/Bottom positioning correctly or different margins.
+      // Here we use absolute margin offsets from bottom.
+      
+      const gap = 10;
+      
       if (config.stackOrder === 'secondary-top') {
-          primMarginV = 40;
-          secMarginV = 80;
+          // Secondary is ABOVE Primary
+          // Primary is at bottom (e.g. margin 40)
+          // Secondary is at bottom + primSize + gap
+          primMarginV = 50; 
+          secMarginV = 50 + primSize + gap;
       } else {
-          primMarginV = 80;
-          secMarginV = 40;
-      }
-  } else {
-      // Split Layout
-      // Bottom subtitle stays at 40 (or 50). Top goes to Alignment 8.
-      if (config.stackOrder === 'primary-top') {
-          // Primary Top (Align 8), Secondary Bottom (Align 2)
-           // We handle alignment in the style string below, but margins need to be set logic wise
-           // Actually, for split, one is Align 8, one is Align 2.
+          // Primary is ABOVE Secondary
+          // Secondary is at bottom
+          secMarginV = 50;
+          primMarginV = 50 + secSize + gap;
       }
   }
 
-  // Define Layout Styles
-  let stylePrimary = '';
-  let styleSecondary = '';
-
-  // Common ASS Params based on user request (ScaleY 140)
   // Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-  const commonParams = `Arial,SIZE,COLOR,&H000000FF,&H3C000000,&H7F000000,0,0,0,0,100,140,0,0,1,2,0,ALIGN,0000,0000,MARGIN,1`;
+  // Note: We use BorderStyle=1 (Outline + Drop shadow).
+  const commonParams = `Arial,SIZE,COLOR,&H000000FF,&H00000000,&H7F000000,0,0,0,0,100,100,0,0,1,OUTLINE,SHADOW,ALIGN,0000,0000,MARGIN,1`;
 
   const buildStyle = (name: string, size: number, color: string, align: number, margin: number) => {
       return `Style: ${name},` + commonParams
         .replace('SIZE', size.toString())
         .replace('COLOR', color)
         .replace('ALIGN', align.toString())
-        .replace('MARGIN', margin.toString());
+        .replace('MARGIN', margin.toString())
+        .replace('OUTLINE', outline.toString())
+        .replace('SHADOW', shadow.toString());
   };
 
+  let stylePrimary = '';
+  let styleSecondary = '';
+
   if (config.layout === 'stacked') {
-      // Both Alignment 2 (Bottom)
+      // Both Alignment 2 (Bottom Center)
       stylePrimary = buildStyle('Primary', primSize, primaryColorAss, 2, primMarginV);
       styleSecondary = buildStyle('Secondary', secSize, secondaryColorAss, 2, secMarginV);
   } else {
       // Split
       if (config.stackOrder === 'primary-top') {
-          stylePrimary = buildStyle('Primary', primSize, primaryColorAss, 8, 30); // Top
-          styleSecondary = buildStyle('Secondary', secSize, secondaryColorAss, 2, 40); // Bottom
+          stylePrimary = buildStyle('Primary', primSize, primaryColorAss, 8, 30); // Top Center
+          styleSecondary = buildStyle('Secondary', secSize, secondaryColorAss, 2, 40); // Bottom Center
       } else {
-          stylePrimary = buildStyle('Primary', primSize, primaryColorAss, 2, 40); // Bottom
-          styleSecondary = buildStyle('Secondary', secSize, secondaryColorAss, 8, 30); // Top
+          stylePrimary = buildStyle('Primary', primSize, primaryColorAss, 2, 40); // Bottom Center
+          styleSecondary = buildStyle('Secondary', secSize, secondaryColorAss, 8, 30); // Top Center
       }
   }
 

@@ -72,4 +72,6 @@ export interface AssStyleConfig {
         color: string;
         fontSize: number;
     };
+    outlineWidth: number;
+    shadowDepth: number;
 }
