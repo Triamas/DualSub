@@ -263,11 +263,6 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
         desc: 'The classic website database'
     },
     {
-        name: 'Subscene',
-        url: (q: string) => `https://subscene.com/subtitles/searchbytitle?query=${encodeURIComponent(q)}`,
-        desc: 'Popular community-driven subtitles'
-    },
-    {
         name: 'Addic7ed',
         url: (q: string) => `https://www.addic7ed.com/search.php?search=${encodeURIComponent(q)}&Submit=Search`,
         desc: 'Fast updates for TV shows'
