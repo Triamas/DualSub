@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Search as SearchIcon, Info, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Video, Type } from 'lucide-react';
 import { SubtitleLine, TabView, AssStyleConfig, BatchItem } from './types';
 import { parseSRT, generateASS, downloadFile, STYLE_PRESETS } from './services/subtitleUtils';
-import { translateBatch, generateContext } from './services/geminiService';
+import { translateBatch, generateContext, detectLanguage } from './services/geminiService';
 import SubtitleSearch from './components/OpenSubtitlesSearch';
 import JSZip from 'jszip';
 
@@ -161,21 +161,25 @@ function App() {
           if (isCancelled.current) return;
 
           // Target is: (Completed / Total) * 100
-          // But to be smoother, we include the "Active" lines as potential progress.
-          // We cap the visual progress at 99% until it's actually done.
-          
           const floorPercent = (completedLinesRef.current / totalLines) * 100;
-          const ceilingPercent = ((completedLinesRef.current + activeLinesRef.current) / totalLines) * 100;
+
+          // To prevent the progress bar from rushing to 100% when multiple chunks are active,
+          // we limit the visual "active" progress to just one batch size ahead of completion.
+          // This gives a step-by-step crawl effect (e.g. crawl to 25%, then 50%...) even if concurrency is high.
+          const visibleActiveLines = Math.min(activeLinesRef.current, BATCH_SIZE);
+          const ceilingPercent = ((completedLinesRef.current + visibleActiveLines) / totalLines) * 100;
           
           let current = progressValueRef.current;
           
-          // If current is behind the "floor" (completed), jump to floor
+          // If current is behind the "floor" (completed), jump to floor immediately
           if (current < floorPercent) {
               current = floorPercent;
           } 
-          // If current is less than the "ceiling" (active processing), creep up slowly
+          // If current is less than the visual ceiling, creep up slowly
           else if (current < ceilingPercent && current < 99) {
-              current += 0.5; // Slide up slowly
+              // 0.1 per 100ms = 1% per second. 
+              // This is a conservative speed to ensure the bar is still moving but doesn't finish too early.
+              current += 0.1; 
           }
 
           if (current > 99) current = 99;
@@ -190,7 +194,22 @@ function App() {
 
       }, 100);
 
-      // Generate Context if needed
+      // 1. Language Verification
+      setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, message: 'Verifying language...' } : pi));
+      const isEnglish = await detectLanguage(item.subtitles);
+      
+      if (!isEnglish) {
+           setBatchItems(prev => prev.map(pi => pi.id === itemId ? { 
+              ...pi, 
+              status: 'error', 
+              progress: 0, 
+              message: 'Error: Source is not English'
+          } : pi));
+          clearInterval(progressInterval);
+          return;
+      }
+
+      // 2. Generate Context if needed
       let context = item.context || "";
       if (autoContext && !context) {
           setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, message: 'Analyzing context...' } : pi));

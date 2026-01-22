@@ -37,6 +37,43 @@ export const generateContext = async (filename: string): Promise<string> => {
     }
 };
 
+/**
+ * Checks if the source subtitles are primarily in English.
+ */
+export const detectLanguage = async (lines: SubtitleLine[]): Promise<boolean> => {
+    const ai = getClient();
+    // Take a sample from the first 20 lines, filtering out short/empty ones to get actual dialogue
+    const sample = lines
+        .filter(l => l.originalText.length > 5) 
+        .slice(0, 20)
+        .map(l => l.originalText)
+        .join('\n');
+        
+    if (!sample) return true; // Empty file or only numbers? Assume valid or let it fail later.
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: `Analyze the following text sample from a subtitle file. 
+            Is the primary language English?
+            Ignore proper names, places, or occasional foreign words.
+            
+            Respond with ONLY "YES" or "NO".
+            
+            TEXT SAMPLE:
+            ${sample}`,
+            config: {
+                responseMimeType: "text/plain",
+            }
+        });
+        const text = response.text?.trim().toUpperCase() || "";
+        return text.includes("YES");
+    } catch (error) {
+        console.warn("Language detection API failed, allowing continuation.", error);
+        return true; 
+    }
+};
+
 const getLanguageInstruction = (targetLanguage: string, context: string, isRetry: boolean = false): string => {
     const baseContext = context ? `CONTEXT: ${context}.` : '';
     let instruction = `${baseContext}\n`;

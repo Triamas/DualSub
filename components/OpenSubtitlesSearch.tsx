@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Download, AlertCircle, Key, ExternalLink, Globe, Film, Clapperboard, Layers, LogOut } from 'lucide-react';
+import { Search, Download, AlertCircle, Key, ExternalLink, Globe, Film, Clapperboard, Layers, LogOut, Clock, X } from 'lucide-react';
 import { UnifiedSubtitle } from '../types';
 import JSZip from 'jszip';
 
@@ -18,6 +18,14 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
   const [season, setSeason] = useState('');
   const [episode, setEpisode] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>('query');
+  
+  // History State
+  const [history, setHistory] = useState<string[]>(() => {
+    try {
+        const item = localStorage.getItem('search_history');
+        return item ? JSON.parse(item) : [];
+    } catch { return []; }
+  });
   
   // API Keys - Load from localStorage
   const [osApiKey, setOsApiKey] = useState(() => localStorage.getItem('os_api_key') || '');
@@ -44,10 +52,28 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
     localStorage.setItem('subdl_api_key', newVal);
   };
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const addToHistory = (q: string) => {
+    if (!q.trim()) return;
+    const cleanQ = q.trim();
+    const newHist = [cleanQ, ...history.filter(h => h !== cleanQ)].slice(0, 5);
+    setHistory(newHist);
+    localStorage.setItem('search_history', JSON.stringify(newHist));
+  };
+
+  const removeFromHistory = (e: React.MouseEvent, q: string) => {
+      e.stopPropagation();
+      const newHist = history.filter(h => h !== q);
+      setHistory(newHist);
+      localStorage.setItem('search_history', JSON.stringify(newHist));
+  };
+
+  const handleSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!query) return;
     
+    // Save to history
+    addToHistory(query);
+
     // For external providers, we don't need to fetch anything
     if (provider === 'External') {
         return; 
@@ -400,6 +426,30 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                     </button>
                 )}
             </div>
+            
+            {/* Search History Tag Cloud */}
+            {history.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-zinc-500 text-xs flex items-center gap-1"><Clock className="w-3 h-3"/> Recent:</span>
+                    {history.map((histItem, idx) => (
+                        <div 
+                            key={idx}
+                            onClick={() => {
+                                setQuery(histItem);
+                            }}
+                            className="bg-zinc-800 text-zinc-300 px-2 py-1 rounded-md border border-zinc-700 hover:border-yellow-500/50 hover:text-white cursor-pointer flex items-center gap-1 group transition-colors"
+                        >
+                            <span>{histItem}</span>
+                            <span 
+                                onClick={(e) => removeFromHistory(e, histItem)}
+                                className="text-zinc-500 hover:text-red-400 p-0.5 rounded-full"
+                            >
+                                <X className="w-3 h-3" />
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            )}
           </form>
       </div>
       
