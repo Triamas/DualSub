@@ -50,6 +50,9 @@ function App() {
   const [styleConfig, setStyleConfig] = useState<AssStyleConfig>(STYLE_PRESETS.DEFAULT);
   const [showStyleConfig, setShowStyleConfig] = useState(false);
 
+  // Confirmation Request State
+  const [confirmationRequest, setConfirmationRequest] = useState<{ itemId: string; fileName: string; detectedLanguage: string; resolve: (val: boolean) => void } | null>(null);
+
   // Refs for cancelling translation & Progress Tracking
   const isCancelled = useRef(false);
   const isTranslating = useRef(false);
@@ -196,17 +199,33 @@ function App() {
 
       // 1. Language Verification
       setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, message: 'Verifying language...' } : pi));
-      const isEnglish = await detectLanguage(item.subtitles);
+      const { isEnglish, language } = await detectLanguage(item.subtitles);
       
       if (!isEnglish) {
-           setBatchItems(prev => prev.map(pi => pi.id === itemId ? { 
-              ...pi, 
-              status: 'error', 
-              progress: 0, 
-              message: 'Error: Source is not English'
-          } : pi));
-          clearInterval(progressInterval);
-          return;
+           setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, message: `Detected: ${language}` } : pi));
+           
+           const userConfirmed = await new Promise<boolean>((resolve) => {
+               setConfirmationRequest({
+                   itemId,
+                   fileName: item.fileName,
+                   detectedLanguage: language,
+                   resolve: (val) => {
+                       setConfirmationRequest(null);
+                       resolve(val);
+                   }
+               });
+           });
+
+           if (!userConfirmed) {
+                setBatchItems(prev => prev.map(pi => pi.id === itemId ? { 
+                    ...pi, 
+                    status: 'error', 
+                    progress: 0, 
+                    message: `Cancelled (${language})`
+                } : pi));
+                clearInterval(progressInterval);
+                return;
+           }
       }
 
       // 2. Generate Context if needed
@@ -757,6 +776,41 @@ function App() {
                         </div>
                     </div>
                 )}
+            </div>
+        )}
+        
+        {confirmationRequest && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+                <div className="bg-zinc-900 border border-zinc-700 p-6 rounded-xl max-w-md w-full shadow-2xl space-y-4 ring-1 ring-white/10">
+                    <div className="flex items-center gap-3 text-amber-500">
+                        <AlertTriangle className="w-8 h-8" />
+                        <h3 className="text-xl font-bold text-white">Non-English Source Detected</h3>
+                    </div>
+                    
+                    <p className="text-zinc-400">
+                        The file <span className="text-white font-medium">{confirmationRequest.fileName}</span> appears to be in <span className="text-amber-400 font-bold">{confirmationRequest.detectedLanguage}</span>.
+                    </p>
+                    
+                    <p className="text-sm text-zinc-500 bg-zinc-950/50 p-3 rounded-lg border border-zinc-800">
+                        This tool is optimized for <strong>English-to-{targetLang}</strong> translation. 
+                        Continuing may result in lower quality translations or unexpected behavior.
+                    </p>
+
+                    <div className="flex gap-3 pt-2">
+                        <button 
+                            onClick={() => confirmationRequest.resolve(false)}
+                            className="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors"
+                        >
+                            Cancel
+                        </button>
+                        <button 
+                            onClick={() => confirmationRequest.resolve(true)}
+                            className="flex-1 px-4 py-3 bg-amber-500 hover:bg-amber-400 text-black rounded-lg font-bold transition-colors"
+                        >
+                            Translate Anyway
+                        </button>
+                    </div>
+                </div>
             </div>
         )}
       </main>

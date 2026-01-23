@@ -38,9 +38,9 @@ export const generateContext = async (filename: string): Promise<string> => {
 };
 
 /**
- * Checks if the source subtitles are primarily in English.
+ * Checks the source language. Returns object with isEnglish flag and detected language name.
  */
-export const detectLanguage = async (lines: SubtitleLine[]): Promise<boolean> => {
+export const detectLanguage = async (lines: SubtitleLine[]): Promise<{ isEnglish: boolean; language: string }> => {
     const ai = getClient();
     // Take a sample from the first 20 lines, filtering out short/empty ones to get actual dialogue
     const sample = lines
@@ -49,16 +49,15 @@ export const detectLanguage = async (lines: SubtitleLine[]): Promise<boolean> =>
         .map(l => l.originalText)
         .join('\n');
         
-    if (!sample) return true; // Empty file or only numbers? Assume valid or let it fail later.
+    if (!sample) return { isEnglish: true, language: 'English' }; 
 
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: `Analyze the following text sample from a subtitle file. 
-            Is the primary language English?
-            Ignore proper names, places, or occasional foreign words.
+            Identify the primary language.
             
-            Respond with ONLY "YES" or "NO".
+            Respond with ONLY the language name (e.g. "English", "Vietnamese", "Spanish").
             
             TEXT SAMPLE:
             ${sample}`,
@@ -66,11 +65,16 @@ export const detectLanguage = async (lines: SubtitleLine[]): Promise<boolean> =>
                 responseMimeType: "text/plain",
             }
         });
-        const text = response.text?.trim().toUpperCase() || "";
-        return text.includes("YES");
+        
+        let text = response.text?.trim() || "English";
+        // Clean up punctuation if any, keep letters and spaces
+        const languageName = text.replace(/[.]/g, '').trim();
+        
+        const isEnglish = languageName.toLowerCase().includes("english");
+        return { isEnglish, language: languageName };
     } catch (error) {
-        console.warn("Language detection API failed, allowing continuation.", error);
-        return true; 
+        console.warn("Language detection API failed, assuming English.", error);
+        return { isEnglish: true, language: 'English' }; 
     }
 };
 
