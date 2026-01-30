@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { SubtitleLine } from "../types";
+import { SubtitleLine, ModelConfig } from "../types";
 
 const getClient = () => {
     const apiKey = process.env.API_KEY;
@@ -91,14 +91,21 @@ const getLanguageInstruction = (targetLanguage: string, context: string, isRetry
         instruction += `Translate naturally and conversationally.`;
     }
 
+    instruction += `\n
+    STRICT FORMATTING RULES:
+    1. MAX LENGTH: Each line must be MAX 42 characters.
+    2. LINE COUNT: Max 2 lines per subtitle.
+    3. TRAPEZOID SHAPE: If 2 lines are needed, prefer the top line to be shorter than the bottom line.
+    4. LINGUISTIC BREAKS: Never split a noun from its article, or a preposition from its noun. Break at natural pauses (commas, conjunctions).
+    5. DIALOGUE: If the subtitle contains dialogue for two people (starts with "- "), keep each person's speech on its own line.
+    6. LINE BREAK TOKEN: Use the token "[br]" to indicate a line break within the subtitle. Do NOT use literal newlines.
+    `;
+
     if (isRetry) {
-        instruction += `\n\nCRITICAL INSTRUCTION: The previous translations for these lines were TOO LONG. You MUST translate them more concisely.
-        - Shorten sentences.
-        - Remove redundancy.
-        - Maximum 2 lines of text visually.
-        - If the English is short, the translation MUST be short.`;
-    } else {
-        instruction += `\nMaintain consistent tone. Avoid making the translation significantly longer than the original unless necessary for grammar.`;
+        instruction += `\n\nCRITICAL RETRY INSTRUCTION: The previous translations were TOO LONG. You MUST condense the meaning.
+        - Sacrifice minor details for brevity.
+        - Use shorter synonyms.
+        - STRICTLY enforce the 42 character limit.`;
     }
 
     return instruction;
@@ -108,7 +115,8 @@ export const translateBatch = async (
   lines: SubtitleLine[], 
   targetLanguage: string = "Vietnamese",
   context: string = "",
-  previousLines: SubtitleLine[] = []
+  previousLines: SubtitleLine[] = [],
+  modelConfig: ModelConfig = { temperature: 0.3, topP: 0.95, topK: 40, maxOutputTokens: 8192 }
 ): Promise<Map<number, string>> => {
   
   const performTranslation = async (linesToProcess: SubtitleLine[], isRetry: boolean): Promise<Map<number, string>> => {
@@ -121,21 +129,18 @@ export const translateBatch = async (
       const inputBlock = linesToProcess.map(l => `${l.id} ||| ${l.originalText}`).join('\n');
       const contextInstruction = getLanguageInstruction(targetLanguage, context, isRetry);
 
-      const prompt = `You are a professional subtitle translator. Translate the following lines from English to ${targetLanguage}.
+      const prompt = `You are a professional subtitle translator and formatter. Translate from English to ${targetLanguage}.
 
 ${contextInstruction}
 
 Rules:
-1. Each line starts with an ID and " ||| ". Keep the ID and separator EXACTLY as is.
-2. Translate the text after the separator. 
+1. Input format: "ID ||| Text". Output format: "ID ||| Translated Text".
+2. Keep the ID and " ||| " separator EXACTLY as is.
 3. PRESERVE formatting tags (like <i>, <b>, <font>) exactly as they appear.
-4. ACCURACY & LENGTH: Translate accurately but concisely. English subtitles usually fit in 1-2 lines. Your translation should try to match the length/duration of the original.
-   - If the English is short (1 line), keep the translation short (1-2 lines).
-   - Only use 3 lines if the English source is also long or dense.
-   - Do not summarize proper nouns or numbers, but you may condense phrasing for readability.
-5. Keep the translation natural and grammatical, suitable for subtitles.
-6. Do not add any conversational filler, markdown code blocks, or explanations. Just the data.
-${!isRetry ? '7. The "PREVIOUS LINES" section is provided purely for context to maintain continuity. DO NOT translate them again.' : ''}
+4. Insert "[br]" where a line break is necessary to meet the 42-char/2-line limit.
+5. Do not add any conversational filler. Just the data.
+
+${!isRetry ? 'The "PREVIOUS LINES" section is provided for context continuity only.' : ''}
 
 ${previousBlock}LINES TO TRANSLATE:
 ${inputBlock}`;
@@ -144,7 +149,13 @@ ${inputBlock}`;
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview', 
             contents: prompt,
-            config: { responseMimeType: "text/plain" }
+            config: { 
+                responseMimeType: "text/plain",
+                temperature: modelConfig.temperature,
+                topP: modelConfig.topP,
+                topK: modelConfig.topK,
+                maxOutputTokens: modelConfig.maxOutputTokens
+            }
         });
 
         const text = response.text || "";
@@ -177,31 +188,23 @@ ${inputBlock}`;
   const linesToRetry: SubtitleLine[] = [];
   const finalResults = new Map<number, string>(initialResults);
 
-  // Heuristics for "Too Long"
-  // Approx 40 chars per line. 
-  // 3 lines ~ 120 chars. 
-  // English short ~ 70 chars (less than 2 full lines).
-  // If translation is > 110 chars AND English is < 70 chars, it is likely too long/verbose.
-  const CHAR_LIMIT_LONG = 110; 
-  const CHAR_LIMIT_SOURCE_SHORT = 70;
-
+  // Heuristics for "Too Long" - Adjusted for the [br] token and 42 char limit
+  // If a line is > 50 chars and has no [br], it's definitely too long.
+  // If total length > 90 chars (approx 2 full lines + overhead), retry.
+  
   initialResults.forEach((translatedText, id) => {
-      const originalLine = lines.find(l => l.id === id);
-      if (originalLine) {
-          const enLen = originalLine.originalText.length;
-          const trLen = translatedText.length;
-
-          if (trLen > CHAR_LIMIT_LONG && enLen < CHAR_LIMIT_SOURCE_SHORT) {
-              linesToRetry.push(originalLine);
-          }
+      const len = translatedText.replace('[br]', '').length;
+      if (len > 90) {
+          const originalLine = lines.find(l => l.id === id);
+          if (originalLine) linesToRetry.push(originalLine);
       }
   });
 
   if (linesToRetry.length > 0) {
       // Perform a targeted retry for just the problematic lines with strict instructions
+      // Use slightly lower temperature for retry to ensure adherence to rules
       const retryResults = await performTranslation(linesToRetry, true);
       
-      // Merge retry results, overwriting the verbose ones
       retryResults.forEach((val, key) => {
           finalResults.set(key, val);
       });

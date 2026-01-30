@@ -88,3 +88,10 @@ export interface AssStyleConfig {
     borderStyle: 1 | 3; // 1=Outline+Shadow, 3=Opaque Box
     fontFamily: string;
 }
+
+export interface ModelConfig {
+    temperature: number;
+    topP: number;
+    topK: number;
+    maxOutputTokens: number;
+}

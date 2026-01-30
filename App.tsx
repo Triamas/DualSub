@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Search as SearchIcon, Info, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Video, Type } from 'lucide-react';
-import { SubtitleLine, TabView, AssStyleConfig, BatchItem } from './types';
+import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Search as SearchIcon, Info, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Video, Type, Cog, X } from 'lucide-react';
+import { SubtitleLine, TabView, AssStyleConfig, BatchItem, ModelConfig } from './types';
 import { parseSRT, generateASS, downloadFile, STYLE_PRESETS } from './services/subtitleUtils';
 import { translateBatch, generateContext, detectLanguage } from './services/geminiService';
 import SubtitleSearch from './components/OpenSubtitlesSearch';
@@ -46,6 +46,15 @@ function App() {
       return localStorage.getItem('target_language') || 'Vietnamese';
   });
   
+  // Model Configuration State
+  const [modelConfig, setModelConfig] = useState<ModelConfig>({
+      temperature: 0.3,
+      topP: 0.95,
+      topK: 40,
+      maxOutputTokens: 8192
+  });
+  const [showModelSettings, setShowModelSettings] = useState(false);
+
   // Style Configuration State
   const [styleConfig, setStyleConfig] = useState<AssStyleConfig>(STYLE_PRESETS.DEFAULT);
   const [showStyleConfig, setShowStyleConfig] = useState(false);
@@ -86,7 +95,7 @@ function App() {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
-    const newItems: BatchItem[] = Array.from(files).map(file => ({
+    const newItems: BatchItem[] = Array.from(files).map((file: File) => ({
         id: crypto.randomUUID(),
         fileName: file.name,
         originalFile: file,
@@ -263,7 +272,8 @@ function App() {
           
           if (linesToTranslate.length > 0) {
               try {
-                const translations = await translateBatch(linesToTranslate, targetLang, context, previous);
+                // PASS MODEL CONFIG HERE
+                const translations = await translateBatch(linesToTranslate, targetLang, context, previous, modelConfig);
                 linesToTranslate.forEach(line => {
                     if (translations.has(line.id)) {
                         line.translatedText = translations.get(line.id);
@@ -400,6 +410,13 @@ function App() {
                      </span>
                  </div>
              )}
+             <button 
+                onClick={() => setShowModelSettings(true)}
+                className="p-2 text-zinc-400 hover:text-white bg-zinc-800/50 hover:bg-zinc-800 rounded-lg transition-colors border border-transparent hover:border-zinc-700"
+                title="Model Settings"
+             >
+                 <Cog className="w-5 h-5" />
+             </button>
           </div>
         </div>
       </header>
@@ -763,10 +780,16 @@ function App() {
                                            {sub.startTime.split(',')[0]}
                                        </div>
                                        <div className="col-span-4 p-4 text-zinc-300">
-                                           {sub.originalText}
+                                           {/* Replace our special break token with visual break for preview */}
+                                           {sub.originalText.replace(/\[br\]/g, ' ')}
                                        </div>
                                        <div className="col-span-5 p-4 text-yellow-500/90 font-medium">
-                                           {sub.translatedText || (
+                                           {sub.translatedText ? sub.translatedText.split('[br]').map((line, i) => (
+                                               <React.Fragment key={i}>
+                                                   {i > 0 && <br />}
+                                                   {line}
+                                               </React.Fragment>
+                                           )) : (
                                                <span className="text-zinc-700 italic text-xs">Waiting for translation...</span>
                                            )}
                                        </div>
@@ -779,6 +802,7 @@ function App() {
             </div>
         )}
         
+        {/* Confirmation Modal */}
         {confirmationRequest && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
                 <div className="bg-zinc-900 border border-zinc-700 p-6 rounded-xl max-w-md w-full shadow-2xl space-y-4 ring-1 ring-white/10">
@@ -808,6 +832,95 @@ function App() {
                             className="flex-1 px-4 py-3 bg-amber-500 hover:bg-amber-400 text-black rounded-lg font-bold transition-colors"
                         >
                             Translate Anyway
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* Model Settings Modal */}
+        {showModelSettings && (
+             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+                <div className="bg-zinc-900 border border-zinc-700 p-6 rounded-xl max-w-md w-full shadow-2xl space-y-6 ring-1 ring-white/10">
+                    <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+                        <div className="flex items-center gap-2">
+                            <div className="p-2 bg-yellow-500/10 rounded-lg">
+                                <Cog className="w-5 h-5 text-yellow-500" />
+                            </div>
+                            <h3 className="text-lg font-bold text-white">Gemini Model Settings</h3>
+                        </div>
+                        <button onClick={() => setShowModelSettings(false)} className="text-zinc-500 hover:text-white transition-colors">
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+
+                    <div className="space-y-5">
+                         {/* Temperature */}
+                        <div className="space-y-2">
+                            <div className="flex justify-between">
+                                <label className="text-sm font-medium text-zinc-300">Temperature</label>
+                                <span className="text-xs font-mono text-yellow-500">{modelConfig.temperature}</span>
+                            </div>
+                            <input 
+                                type="range" min="0" max="1" step="0.1"
+                                value={modelConfig.temperature}
+                                onChange={(e) => setModelConfig({...modelConfig, temperature: parseFloat(e.target.value)})}
+                                className="w-full accent-yellow-500 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                            />
+                            <p className="text-xs text-zinc-500">Higher values mean more creative/random outputs. Lower values are more deterministic.</p>
+                        </div>
+
+                        {/* Top P */}
+                        <div className="space-y-2">
+                            <div className="flex justify-between">
+                                <label className="text-sm font-medium text-zinc-300">Top P</label>
+                                <span className="text-xs font-mono text-yellow-500">{modelConfig.topP}</span>
+                            </div>
+                             <input 
+                                type="range" min="0" max="1" step="0.05"
+                                value={modelConfig.topP}
+                                onChange={(e) => setModelConfig({...modelConfig, topP: parseFloat(e.target.value)})}
+                                className="w-full accent-yellow-500 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                            />
+                            <p className="text-xs text-zinc-500">Nucleus sampling. Lower values reduce the pool of words considered.</p>
+                        </div>
+
+                        {/* Top K */}
+                         <div className="space-y-2">
+                            <div className="flex justify-between">
+                                <label className="text-sm font-medium text-zinc-300">Top K</label>
+                                <span className="text-xs font-mono text-yellow-500">{modelConfig.topK}</span>
+                            </div>
+                             <input 
+                                type="range" min="1" max="100" step="1"
+                                value={modelConfig.topK}
+                                onChange={(e) => setModelConfig({...modelConfig, topK: parseInt(e.target.value)})}
+                                className="w-full accent-yellow-500 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                            />
+                            <p className="text-xs text-zinc-500">Limits the number of highest probability tokens considered for each step.</p>
+                        </div>
+
+                        {/* Max Tokens */}
+                        <div className="space-y-2">
+                            <div className="flex justify-between">
+                                <label className="text-sm font-medium text-zinc-300">Max Output Tokens</label>
+                                <span className="text-xs font-mono text-yellow-500">{modelConfig.maxOutputTokens}</span>
+                            </div>
+                             <input 
+                                type="range" min="1024" max="8192" step="1024"
+                                value={modelConfig.maxOutputTokens}
+                                onChange={(e) => setModelConfig({...modelConfig, maxOutputTokens: parseInt(e.target.value)})}
+                                className="w-full accent-yellow-500 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-zinc-800">
+                        <button 
+                            onClick={() => setShowModelSettings(false)}
+                            className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg font-medium transition-colors"
+                        >
+                            Close
                         </button>
                     </div>
                 </div>

@@ -228,8 +228,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const start = convertToASSTime(sub.startTime);
     const end = convertToASSTime(sub.endTime);
     
-    const original = sub.originalText.replace(/<[^>]*>/g, '').trim(); 
-    const translated = sub.translatedText ? sub.translatedText.replace(/<[^>]*>/g, '').trim() : '';
+    // Helper to sanitize text but KEEP the custom [br] token for now
+    const clean = (text: string) => text.replace(/<[^>]*>/g, '').trim();
+    
+    // Replace [br] with \N for ASS hard line break
+    const formatBreak = (text: string) => text.split('[br]').map(clean).join('\\N');
+
+    const original = formatBreak(sub.originalText); 
+    const translated = sub.translatedText ? formatBreak(sub.translatedText) : '';
 
     if (!translated && !original) return '';
 
