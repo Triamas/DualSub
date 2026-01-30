@@ -4,10 +4,36 @@ const CPS = 20; // Characters per second reading speed
 const MIN_GAP_MS = 50; // Strict gap between subtitles
 const MIN_DURATION_MS = 1000; // Minimum duration for a subtitle line
 
+const TAG_REGEX = /<[^>]*>/g;
+const BR_REGEX = /\[br\]/g;
+const B_TAG_OPEN = /<b>/gi;
+const B_TAG_CLOSE = /<\/b>/gi;
+const I_TAG_OPEN = /<i>/gi;
+const I_TAG_CLOSE = /<\/i>/gi;
+const U_TAG_OPEN = /<u>/gi;
+const U_TAG_CLOSE = /<\/u>/gi;
+const ANY_TAG = /<[^>]+>/g;
+
 /**
  * Strips HTML tags from text to get actual character count.
  */
-const stripTags = (html: string) => html.replace(/<[^>]*>/g, '');
+const stripTags = (html: string) => html.replace(TAG_REGEX, '');
+
+/**
+ * Converts SRT HTML-like tags to ASS override tags.
+ * <i> -> {\i1}, </i> -> {\i0}
+ * <b> -> {\b1}, </b> -> {\b0}
+ * <u> -> {\u1}, </u> -> {\u0}
+ * Strips other unknown tags to prevent raw HTML in ASS.
+ */
+const srtToAss = (text: string): string => {
+    return text
+        .replace(B_TAG_OPEN, '{\\b1}').replace(B_TAG_CLOSE, '{\\b0}')
+        .replace(I_TAG_OPEN, '{\\i1}').replace(I_TAG_CLOSE, '{\\i0}')
+        .replace(U_TAG_OPEN, '{\\u1}').replace(U_TAG_CLOSE, '{\\u0}')
+        // Remove any remaining HTML tags that aren't supported or converted
+        .replace(ANY_TAG, '');
+};
 
 /**
  * Parses SRT timestamp "00:00:00,000" to milliseconds.
@@ -45,8 +71,11 @@ const optimizeTimings = (subtitles: SubtitleLine[]): SubtitleLine[] => {
         let endMs = parseTimeMs(sub.endTime);
         const originalDuration = endMs - startMs;
 
-        const textEn = stripTags(sub.originalText || '');
-        const textVi = stripTags(sub.translatedText || '');
+        // Strip tags AND [br] tokens for accurate length calculation
+        const cleanForLength = (s: string) => stripTags(s || '').replace(BR_REGEX, '');
+
+        const textEn = cleanForLength(sub.originalText);
+        const textVi = cleanForLength(sub.translatedText || '');
         const maxChars = Math.max(textEn.length, textVi.length);
         
         // Calculate ideal reading duration
@@ -103,7 +132,8 @@ export const parseSRT = (data: string): SubtitleLine[] => {
       const id = parseInt(lines[0], 10);
       const timeMatch = lines[1].match(/(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})/);
       if (timeMatch) {
-        const text = lines.slice(2).join(' '); 
+        // preserve line breaks using our token [br] so we can respect double line settings later
+        const text = lines.slice(2).join('[br]'); 
         subtitles.push({
           id: isNaN(id) ? subtitles.length + 1 : id,
           startTime: timeMatch[1],
@@ -153,26 +183,51 @@ export const generateASS = (subtitles: SubtitleLine[], config: AssStyleConfig): 
   const font = config.fontFamily || 'Arial';
   
   // Margin Calculation based on Stack Order
-  let primMarginV = 80;
-  let secMarginV = 40;
+  // Use robust estimation for max height of bottom subtitle to prevent overlap
+  let primMarginV = 60; // Default fallback
+  let secMarginV = 60;
   
   if (config.layout === 'stacked') {
-      // Logic for stacked margins
-      const gap = 10;
+      const bottomBaseMargin = 60; // Base safety margin from bottom edge (4K safe)
+      const gap = 24; // Visual gap between subtitle blocks
       
+      // Determine max potential height of the bottom block.
+      // linesPerSubtitle defaults to 2 if undefined.
+      // We multiply by 1.25 to account for standard line-height/leading in renderers.
+      const lineMultiplier = config.linesPerSubtitle || 2; 
+      const lineHeightFactor = 1.25;
+
       if (config.stackOrder === 'secondary-top') {
           // Secondary is ABOVE Primary
-          primMarginV = 50; 
-          secMarginV = 50 + primSize + gap;
+          // Primary is at bottom (Alignment 2)
+          primMarginV = bottomBaseMargin;
+          
+          // Calculate max height Primary block might take
+          const primaryBlockHeight = primSize * lineMultiplier * lineHeightFactor;
+          secMarginV = Math.round(bottomBaseMargin + primaryBlockHeight + gap);
       } else {
           // Primary is ABOVE Secondary
-          secMarginV = 50;
-          primMarginV = 50 + secSize + gap;
+          // Secondary is at bottom (Alignment 2)
+          secMarginV = bottomBaseMargin;
+          
+          // Calculate max height Secondary block might take
+          const secondaryBlockHeight = secSize * lineMultiplier * lineHeightFactor;
+          primMarginV = Math.round(bottomBaseMargin + secondaryBlockHeight + gap);
+      }
+  } else {
+      // Split Layout
+      // Alignment 8 (Top Center) margin is from Top edge.
+      // Alignment 2 (Bottom Center) margin is from Bottom edge.
+      if (config.stackOrder === 'primary-top') {
+          primMarginV = 60; // Top margin for Primary
+          secMarginV = 60;  // Bottom margin for Secondary
+      } else {
+          primMarginV = 60; // Bottom margin for Primary
+          secMarginV = 60;  // Top margin for Secondary
       }
   }
 
   // Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-  // Added BORDERSTYLE replacement
   const commonParams = `FONTNAME,SIZE,COLOR,&H000000FF,&H00000000,&H7F000000,0,0,0,0,100,100,0,0,BORDERSTYLE,OUTLINE,SHADOW,ALIGN,0000,0000,MARGIN,1`;
 
   const buildStyle = (name: string, size: number, color: string, align: number, margin: number) => {
@@ -197,11 +252,11 @@ export const generateASS = (subtitles: SubtitleLine[], config: AssStyleConfig): 
   } else {
       // Split
       if (config.stackOrder === 'primary-top') {
-          stylePrimary = buildStyle('Primary', primSize, primaryColorAss, 8, 30); // Top Center
-          styleSecondary = buildStyle('Secondary', secSize, secondaryColorAss, 2, 40); // Bottom Center
+          stylePrimary = buildStyle('Primary', primSize, primaryColorAss, 8, primMarginV); // 8 = Top Center
+          styleSecondary = buildStyle('Secondary', secSize, secondaryColorAss, 2, secMarginV); // 2 = Bottom Center
       } else {
-          stylePrimary = buildStyle('Primary', primSize, primaryColorAss, 2, 40); // Bottom Center
-          styleSecondary = buildStyle('Secondary', secSize, secondaryColorAss, 8, 30); // Top Center
+          stylePrimary = buildStyle('Primary', primSize, primaryColorAss, 2, primMarginV); // 2 = Bottom Center
+          styleSecondary = buildStyle('Secondary', secSize, secondaryColorAss, 8, secMarginV); // 8 = Top Center
       }
   }
 
@@ -228,14 +283,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const start = convertToASSTime(sub.startTime);
     const end = convertToASSTime(sub.endTime);
     
-    // Helper to sanitize text but KEEP the custom [br] token for now
-    const clean = (text: string) => text.replace(/<[^>]*>/g, '').trim();
-    
-    // Replace [br] with \N for ASS hard line break
-    const formatBreak = (text: string) => text.split('[br]').map(clean).join('\\N');
+    // Replace [br] with \N for ASS hard line break, OR space if single-line mode
+    // And convert SRT tags to ASS tags
+    const formatContent = (text: string) => {
+        let processed = srtToAss(text);
+        if (config.linesPerSubtitle === 1) {
+             // Squash to single line
+             return processed.replace(BR_REGEX, ' ');
+        }
+        // Double line (Standard)
+        return processed.split('[br]').join('\\N');
+    };
 
-    const original = formatBreak(sub.originalText); 
-    const translated = sub.translatedText ? formatBreak(sub.translatedText) : '';
+    const original = formatContent(sub.originalText); 
+    const translated = sub.translatedText ? formatContent(sub.translatedText) : '';
 
     if (!translated && !original) return '';
 
@@ -273,6 +334,7 @@ export const STYLE_PRESETS = {
         shadowDepth: 0,
         borderStyle: 1,
         fontFamily: 'Arial',
+        linesPerSubtitle: 2
     } as AssStyleConfig,
     NETFLIX: {
         layout: 'stacked',
@@ -283,6 +345,7 @@ export const STYLE_PRESETS = {
         shadowDepth: 3,
         borderStyle: 1,
         fontFamily: 'Arial',
+        linesPerSubtitle: 2
     } as AssStyleConfig,
     ANIME: {
         layout: 'stacked',
@@ -293,6 +356,7 @@ export const STYLE_PRESETS = {
         shadowDepth: 0,
         borderStyle: 1,
         fontFamily: 'Verdana',
+        linesPerSubtitle: 2
     } as AssStyleConfig,
     CINEMATIC: {
         layout: 'split',
@@ -303,6 +367,7 @@ export const STYLE_PRESETS = {
         shadowDepth: 1,
         borderStyle: 1,
         fontFamily: 'Times New Roman',
+        linesPerSubtitle: 2
     } as AssStyleConfig,
     KODI: {
         layout: 'stacked',
@@ -313,5 +378,6 @@ export const STYLE_PRESETS = {
         shadowDepth: 2,
         borderStyle: 1,
         fontFamily: 'Arial',
+        linesPerSubtitle: 2
     } as AssStyleConfig
 };

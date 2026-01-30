@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Search as SearchIcon, Info, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Video, Type, Cog, X } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Type, Cog, X, AlignJustify, AlignLeft } from 'lucide-react';
 import { SubtitleLine, TabView, AssStyleConfig, BatchItem, ModelConfig } from './types';
 import { parseSRT, generateASS, downloadFile, STYLE_PRESETS } from './services/subtitleUtils';
 import { translateBatch, generateContext, detectLanguage } from './services/geminiService';
@@ -33,6 +33,143 @@ const KODI_FONTS = [
     "Teletext"
 ];
 
+// Helper Component for Visual Preview
+const VisualPreview = ({ 
+    config, 
+    original, 
+    translated
+}: { 
+    config: AssStyleConfig, 
+    original: string, 
+    translated: string
+}) => {
+    
+    const containerStyle: React.CSSProperties = {
+        aspectRatio: '16/9',
+        backgroundColor: '#0a0a0a', 
+        backgroundImage: 'radial-gradient(circle at center, #1a1a1a 0%, #000000 100%)',
+        position: 'relative',
+        overflow: 'hidden',
+        borderRadius: '0.75rem',
+        border: '1px solid #27272a',
+        display: 'flex',
+        flexDirection: 'column',
+        boxShadow: 'inset 0 0 50px rgba(0,0,0,0.8)'
+    };
+
+    // Scale factor to simulate TV appearance on a small screen
+    const SCALE = 0.5; 
+
+    const getTextStyle = (isPrimary: boolean) => {
+        const style = isPrimary ? config.primary : config.secondary;
+        const color = style.color;
+        const size = style.fontSize * SCALE;
+        const outlineW = config.outlineWidth; 
+        const shadowD = config.shadowDepth; 
+        const shadowColor = 'rgba(0,0,0,0.8)';
+        
+        let textShadows = [];
+        // Simulate Outline using text-shadow
+        if (outlineW > 0) {
+            // 8-point stroke simulation
+            const stroke = Math.max(1, outlineW * 0.8); // Scale outline slightly down for preview
+            for(let x = -1; x <= 1; x++) {
+                for(let y = -1; y <= 1; y++) {
+                    if(x!==0 || y!==0) textShadows.push(`${x*stroke}px ${y*stroke}px 0 #000`);
+                }
+            }
+        }
+        // Shadow
+        if (shadowD > 0) {
+             textShadows.push(`${shadowD * 1.5}px ${shadowD * 1.5}px 2px ${shadowColor}`);
+        }
+        
+        return {
+            fontFamily: config.fontFamily,
+            fontSize: `${size}px`,
+            color: color,
+            textShadow: textShadows.length ? textShadows.join(',') : 'none',
+            textAlign: 'center' as const,
+            fontWeight: 600,
+            lineHeight: 1.2,
+            margin: '4px 0',
+            // Simulate border style 3 (Opaque Box) if selected - simplistic visualization
+            backgroundColor: config.borderStyle === 3 ? 'rgba(0,0,0,0.5)' : 'transparent',
+            padding: config.borderStyle === 3 ? '4px 8px' : '4px',
+            whiteSpace: 'pre-wrap' as const, // Ensure whitespace is respected
+            position: 'relative' as const,
+            zIndex: 20
+        };
+    };
+
+    const formatHtml = (text: string) => {
+        if (!text) return { __html: "" };
+        let content = text;
+        // Handle line breaks: [br] -> <br/>
+        if (config.linesPerSubtitle === 1) {
+            content = content.replace(/\[br\]/g, ' ');
+        } else {
+            content = content.replace(/\[br\]/g, '<br/>');
+        }
+        return { __html: content };
+    };
+
+    const renderText = (isPrimary: boolean, actualText: string | undefined) => {
+        const style = getTextStyle(isPrimary);
+        const displayText = actualText || (isPrimary ? "Translated Subtitle Preview" : "Original Subtitle Preview");
+        const isEmpty = !actualText;
+
+        return (
+            <div 
+                style={{
+                    ...style, 
+                    opacity: isEmpty ? 0.5 : 1
+                }} 
+                dangerouslySetInnerHTML={formatHtml(displayText)} 
+            />
+        );
+    };
+
+    const PrimaryText = renderText(true, translated);
+    const SecondaryText = renderText(false, original);
+
+    // Margins relative to the preview container size (simulating screen margins)
+    const MARGIN_V = '5%';
+
+    if (config.layout === 'split') {
+        const top = config.stackOrder === 'primary-top' ? PrimaryText : SecondaryText;
+        const bottom = config.stackOrder === 'primary-top' ? SecondaryText : PrimaryText;
+        return (
+            <div style={containerStyle}>
+                {/* Grid Overlay moved first to be background */}
+                <div className="absolute inset-0 pointer-events-none opacity-10" style={{backgroundImage: 'linear-gradient(0deg, transparent 24%, #ffffff 25%, #ffffff 26%, transparent 27%, transparent 74%, #ffffff 75%, #ffffff 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, #ffffff 25%, #ffffff 26%, transparent 27%, transparent 74%, #ffffff 75%, #ffffff 76%, transparent 77%, transparent)', backgroundSize: '50px 50px', zIndex: 1}}></div>
+                
+                <div style={{position: 'absolute', top: MARGIN_V, left: 0, right: 0, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '0 2rem', zIndex: 10}}>
+                    {top}
+                </div>
+                <div style={{position: 'absolute', bottom: MARGIN_V, left: 0, right: 0, display: 'flex', justifyContent: 'center', alignItems: 'flex-end', padding: '0 2rem', zIndex: 10}}>
+                    {bottom}
+                </div>
+            </div>
+        );
+    } else {
+        // Stacked
+        const top = config.stackOrder === 'primary-top' ? PrimaryText : SecondaryText;
+        const bottom = config.stackOrder === 'primary-top' ? SecondaryText : PrimaryText;
+        return (
+            <div style={containerStyle}>
+                {/* Grid Overlay moved first to be background */}
+                <div className="absolute inset-0 pointer-events-none opacity-10" style={{backgroundImage: 'linear-gradient(0deg, transparent 24%, #ffffff 25%, #ffffff 26%, transparent 27%, transparent 74%, #ffffff 75%, #ffffff 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, #ffffff 25%, #ffffff 26%, transparent 27%, transparent 74%, #ffffff 75%, #ffffff 76%, transparent 77%, transparent)', backgroundSize: '50px 50px', zIndex: 1}}></div>
+                
+                <div style={{position: 'absolute', bottom: MARGIN_V, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', padding: '0 2rem', zIndex: 10}}>
+                    {top}
+                    {bottom}
+                </div>
+            </div>
+        );
+    }
+};
+
 function App() {
   const [activeTab, setActiveTab] = useState<TabView>(TabView.UPLOAD);
   
@@ -62,6 +199,9 @@ function App() {
   // Confirmation Request State
   const [confirmationRequest, setConfirmationRequest] = useState<{ itemId: string; fileName: string; detectedLanguage: string; resolve: (val: boolean) => void } | null>(null);
 
+  // Preview Selection State
+  const [previewLineId, setPreviewLineId] = useState<number | null>(null);
+
   // Refs for cancelling translation & Progress Tracking
   const isCancelled = useRef(false);
   const isTranslating = useRef(false);
@@ -73,6 +213,31 @@ function App() {
 
   // Computed: Active Subtitles for Preview
   const activeItem = batchItems.find(item => item.id === activeItemId) || batchItems[0];
+  
+  // Effect: Auto-select longest line in the first 100 lines when a NEW file becomes active
+  useEffect(() => {
+      // If we already have a valid preview line for the currently active item, don't re-calculate
+      if (previewLineId && activeItem?.subtitles.some(s => s.id === previewLineId)) {
+          return;
+      }
+
+      if (activeItem && activeItem.subtitles.length > 0) {
+          const sample = activeItem.subtitles.slice(0, 100);
+          if (sample.length > 0) {
+              const longest = sample.reduce((prev, current) => 
+                  (prev.originalText.length > current.originalText.length) ? prev : current
+              );
+              setPreviewLineId(longest.id);
+          }
+      } else {
+          setPreviewLineId(null);
+      }
+  }, [activeItemId, activeItem, previewLineId]);
+
+  // Get sample subtitle for visual preview based on selection
+  const selectedSubtitle = activeItem?.subtitles?.find(s => s.id === previewLineId);
+  const sampleOriginal = selectedSubtitle?.originalText || "The quick <b>brown</b> fox jumps over the <i>lazy</i> dog.";
+  const sampleTranslated = selectedSubtitle?.translatedText || "Con cáo <b>nâu</b> nhanh nhẹn nhảy qua chú chó <i>lười</i>.";
   
   // Helper to find the item currently being translated
   const translatingItem = batchItems.find(i => i.status === 'translating');
@@ -641,6 +806,24 @@ function App() {
                                         </div>
 
                                         <div className="space-y-2">
+                                            <span className="text-xs text-zinc-500">Lines per Subtitle</span>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <button 
+                                                    onClick={() => setStyleConfig({...styleConfig, linesPerSubtitle: 1})}
+                                                    className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 ${styleConfig.linesPerSubtitle === 1 ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'}`}
+                                                >
+                                                    <AlignLeft className="w-3 h-3" /> Single Line
+                                                </button>
+                                                <button 
+                                                    onClick={() => setStyleConfig({...styleConfig, linesPerSubtitle: 2})}
+                                                    className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 ${styleConfig.linesPerSubtitle === 2 || !styleConfig.linesPerSubtitle ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'}`}
+                                                >
+                                                    <AlignJustify className="w-3 h-3" /> Double Line
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
                                             <span className="text-xs text-zinc-500">Vertical Order (Stack Mode)</span>
                                             <button 
                                                 onClick={() => setStyleConfig({...styleConfig, stackOrder: styleConfig.stackOrder === 'primary-top' ? 'secondary-top' : 'primary-top'})}
@@ -751,6 +934,15 @@ function App() {
                                         </div>
                                     </div>
                                 </div>
+                                
+                                <div className="mt-8 pt-8 border-t border-zinc-800">
+                                    <label className="text-xs text-zinc-400 font-bold uppercase tracking-wider block mb-4">Live Preview</label>
+                                    <VisualPreview 
+                                        config={styleConfig} 
+                                        original={sampleOriginal} 
+                                        translated={sampleTranslated} 
+                                    />
+                                </div>
                             </div>
                         )}
                     </div>
@@ -762,7 +954,6 @@ function App() {
                             <h3 className="font-semibold text-zinc-300 flex items-center gap-2">
                                 <PlayCircle className="w-4 h-4" /> Preview: <span className="text-white">{activeItem.fileName}</span>
                             </h3>
-                            <span className="text-xs text-zinc-500">Showing first 100 lines</span>
                         </div>
                         <div className="h-[500px] overflow-y-auto p-0 bg-black/20 relative">
                            <div className="grid grid-cols-12 text-xs font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-800 bg-zinc-900/90 sticky top-0 z-10">
@@ -774,22 +965,33 @@ function App() {
                            
                            <div className="divide-y divide-zinc-800/50">
                                {activeItem.subtitles.slice(0, 100).map((sub) => (
-                                   <div key={sub.id} className="grid grid-cols-12 text-sm hover:bg-white/5 transition-colors group">
+                                   <div 
+                                      key={sub.id} 
+                                      onClick={() => setPreviewLineId(sub.id)}
+                                      className={`grid grid-cols-12 text-sm hover:bg-white/5 transition-colors group cursor-pointer ${previewLineId === sub.id ? 'bg-yellow-500/10' : ''}`}
+                                   >
                                        <div className="col-span-1 p-4 text-center text-zinc-600 font-mono text-xs">{sub.id}</div>
                                        <div className="col-span-2 p-4 text-zinc-500 font-mono text-xs whitespace-nowrap">
                                            {sub.startTime.split(',')[0]}
                                        </div>
                                        <div className="col-span-4 p-4 text-zinc-300">
-                                           {/* Replace our special break token with visual break for preview */}
-                                           {sub.originalText.replace(/\[br\]/g, ' ')}
+                                           {/* Respect single/double line setting for preview */}
+                                            {styleConfig.linesPerSubtitle === 1 
+                                                ? sub.originalText.replace(/\[br\]/g, ' ')
+                                                : sub.originalText.split('[br]').map((line, i) => (<React.Fragment key={i}>{i > 0 && <br />}{line}</React.Fragment>))
+                                            }
                                        </div>
                                        <div className="col-span-5 p-4 text-yellow-500/90 font-medium">
-                                           {sub.translatedText ? sub.translatedText.split('[br]').map((line, i) => (
-                                               <React.Fragment key={i}>
-                                                   {i > 0 && <br />}
-                                                   {line}
-                                               </React.Fragment>
-                                           )) : (
+                                           {sub.translatedText ? (
+                                                styleConfig.linesPerSubtitle === 1
+                                                ? sub.translatedText.replace(/\[br\]/g, ' ')
+                                                : sub.translatedText.split('[br]').map((line, i) => (
+                                                   <React.Fragment key={i}>
+                                                       {i > 0 && <br />}
+                                                       {line}
+                                                   </React.Fragment>
+                                                ))
+                                            ) : (
                                                <span className="text-zinc-700 italic text-xs">Waiting for translation...</span>
                                            )}
                                        </div>

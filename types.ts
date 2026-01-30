@@ -50,12 +50,6 @@ export interface OpenSubtitlesResult {
   };
 }
 
-export interface ProcessingState {
-  status: 'idle' | 'searching' | 'parsing' | 'translating' | 'completed' | 'error';
-  message: string;
-  progress: number; // 0 to 100
-}
-
 export interface BatchItem {
     id: string;
     fileName: string;
@@ -87,6 +81,7 @@ export interface AssStyleConfig {
     shadowDepth: number;
     borderStyle: 1 | 3; // 1=Outline+Shadow, 3=Opaque Box
     fontFamily: string;
+    linesPerSubtitle?: 1 | 2; // 1 = Single Line (Squash), 2 = Standard (Max 2 lines)
 }
 
 export interface ModelConfig {

@@ -10,6 +10,29 @@ interface SubtitleSearchProps {
 type SearchMode = 'query' | 'imdb' | 'tmdb';
 type Provider = 'OpenSubtitles' | 'Subdl' | 'External';
 
+const EXTERNAL_PROVIDERS = [
+    {
+        name: 'OpenSubtitles.org',
+        url: (q: string) => `https://www.opensubtitles.org/en/search/sublanguageid-eng/q-${encodeURIComponent(q)}`,
+        desc: 'The classic website database'
+    },
+    {
+        name: 'Addic7ed',
+        url: (q: string) => `https://www.addic7ed.com/search.php?search=${encodeURIComponent(q)}&Submit=Search`,
+        desc: 'Fast updates for TV shows'
+    },
+    {
+        name: 'TVsubtitles.net',
+        url: (q: string) => `http://www.tvsubtitles.net/search.php?q=${encodeURIComponent(q)}`,
+        desc: 'Dedicated to TV series'
+    },
+    {
+        name: 'YIFY Subtitles',
+        url: (q: string) => `https://yts-subs.com/search/${encodeURIComponent(q)}`,
+        desc: 'Movie subtitles source'
+    }
+];
+
 const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => {
   const [provider, setProvider] = useState<Provider>('OpenSubtitles');
   
@@ -282,29 +305,6 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
       }
   };
 
-  const externalProviders = [
-    {
-        name: 'OpenSubtitles.org',
-        url: (q: string) => `https://www.opensubtitles.org/en/search/sublanguageid-eng/q-${encodeURIComponent(q)}`,
-        desc: 'The classic website database'
-    },
-    {
-        name: 'Addic7ed',
-        url: (q: string) => `https://www.addic7ed.com/search.php?search=${encodeURIComponent(q)}&Submit=Search`,
-        desc: 'Fast updates for TV shows'
-    },
-    {
-        name: 'TVsubtitles.net',
-        url: (q: string) => `http://www.tvsubtitles.net/search.php?q=${encodeURIComponent(q)}`,
-        desc: 'Dedicated to TV series'
-    },
-    {
-        name: 'YIFY Subtitles',
-        url: (q: string) => `https://yts-subs.com/search/${encodeURIComponent(q)}`,
-        desc: 'Movie subtitles source'
-    }
-  ];
-
   return (
     <div className="space-y-6">
       {/* Provider & API Key Section */}
@@ -456,7 +456,7 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
       {/* External Links Grid */}
       {provider === 'External' && query && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-              {externalProviders.map((site) => (
+              {EXTERNAL_PROVIDERS.map((site) => (
                   <a 
                     key={site.name}
                     href={site.url(query)}
