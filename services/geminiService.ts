@@ -10,12 +10,30 @@ const getClient = () => {
 };
 
 /**
+ * Helper: Retry mechanism for API calls with exponential backoff for 429 errors.
+ */
+const generateContentWithRetry = async (ai: GoogleGenAI, params: any, retries = 3): Promise<any> => {
+  try {
+    return await ai.models.generateContent(params);
+  } catch (e: any) {
+    // Check for 429 (Too Many Requests) or 503 (Service Unavailable)
+    if ((e.status === 429 || e.status === 503) && retries > 0) {
+      const waitTime = Math.pow(2, 4 - retries) * 1000; // 2s, 4s, 8s
+      console.warn(`API Rate Limit hit. Retrying in ${waitTime}ms...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      return generateContentWithRetry(ai, params, retries - 1);
+    }
+    throw e;
+  }
+};
+
+/**
  * Generates a translation context description based on the filename.
  */
 export const generateContext = async (filename: string): Promise<string> => {
     const ai = getClient();
     try {
-        const response = await ai.models.generateContent({
+        const response = await generateContentWithRetry(ai, {
             model: 'gemini-3-flash-preview',
             contents: `Identify the movie or TV show from this filename: "${filename}". 
             
@@ -42,7 +60,6 @@ export const generateContext = async (filename: string): Promise<string> => {
  */
 export const detectLanguage = async (lines: SubtitleLine[]): Promise<{ isEnglish: boolean; language: string }> => {
     const ai = getClient();
-    // Take a sample from the first 20 lines, filtering out short/empty ones to get actual dialogue
     const sample = lines
         .filter(l => l.originalText.length > 5) 
         .slice(0, 20)
@@ -52,7 +69,7 @@ export const detectLanguage = async (lines: SubtitleLine[]): Promise<{ isEnglish
     if (!sample) return { isEnglish: true, language: 'English' }; 
 
     try {
-        const response = await ai.models.generateContent({
+        const response = await generateContentWithRetry(ai, {
             model: 'gemini-3-flash-preview',
             contents: `Analyze the following text sample from a subtitle file. 
             Identify the primary language.
@@ -67,9 +84,7 @@ export const detectLanguage = async (lines: SubtitleLine[]): Promise<{ isEnglish
         });
         
         let text = response.text?.trim() || "English";
-        // Clean up punctuation if any, keep letters and spaces
         const languageName = text.replace(/[.]/g, '').trim();
-        
         const isEnglish = languageName.toLowerCase().includes("english");
         return { isEnglish, language: languageName };
     } catch (error) {
@@ -95,10 +110,13 @@ const getLanguageInstruction = (targetLanguage: string, context: string, isRetry
     STRICT FORMATTING RULES:
     1. MAX LENGTH: Each line must be MAX 42 characters.
     2. LINE COUNT: Max 2 lines per subtitle.
-    3. TRAPEZOID SHAPE: If 2 lines are needed, prefer the top line to be shorter than the bottom line.
-    4. LINGUISTIC BREAKS: Never split a noun from its article, or a preposition from its noun. Break at natural pauses (commas, conjunctions).
+    3. TIMING AWARENESS: You are provided with the duration of each line in milliseconds. 
+       - If duration < 1500ms, the translation MUST be very concise (2-4 words max).
+       - Do NOT fill space with fluff just because duration is long.
+       - Ensure the viewer has enough time to read the text.
+    4. LINGUISTIC BREAKS: Never split a noun from its article, or a preposition from its noun.
     5. DIALOGUE: If the subtitle contains dialogue for two people (starts with "- "), keep each person's speech on its own line.
-    6. LINE BREAK TOKEN: Use the token "[br]" to indicate a line break within the subtitle. Do NOT use literal newlines.
+    6. LINE BREAK TOKEN: Use the token "[br]" to indicate a line break within the subtitle.
     `;
 
     if (isRetry) {
@@ -116,7 +134,14 @@ export const translateBatch = async (
   targetLanguage: string = "Vietnamese",
   context: string = "",
   previousLines: SubtitleLine[] = [],
-  modelConfig: ModelConfig = { temperature: 0.3, topP: 0.95, topK: 40, maxOutputTokens: 8192 }
+  modelConfig: ModelConfig = { 
+      modelName: 'gemini-3-flash-preview', 
+      temperature: 0.3, 
+      topP: 0.95, 
+      topK: 40, 
+      maxOutputTokens: 8192 
+  },
+  durations: Map<number, number> = new Map()
 ): Promise<Map<number, string>> => {
   
   const performTranslation = async (linesToProcess: SubtitleLine[], isRetry: boolean): Promise<Map<number, string>> => {
@@ -126,7 +151,11 @@ export const translateBatch = async (
         ? `PREVIOUS LINES (Context only - DO NOT TRANSLATE):\n${previousLines.map(l => `${l.id} ||| ${l.originalText}`).join('\n')}\n\n` 
         : '';
 
-      const inputBlock = linesToProcess.map(l => `${l.id} ||| ${l.originalText}`).join('\n');
+      const inputBlock = linesToProcess.map(l => {
+          const dur = durations.get(l.id) || 2000;
+          return `ID: ${l.id} | Dur: ${dur}ms | Text: ${l.originalText}`;
+      }).join('\n');
+      
       const contextInstruction = getLanguageInstruction(targetLanguage, context, isRetry);
 
       const prompt = `You are a professional subtitle translator and formatter. Translate from English to ${targetLanguage}.
@@ -134,11 +163,11 @@ export const translateBatch = async (
 ${contextInstruction}
 
 Rules:
-1. Input format: "ID ||| Text". Output format: "ID ||| Translated Text".
-2. Keep the ID and " ||| " separator EXACTLY as is.
-3. PRESERVE formatting tags (like <i>, <b>, <font>) exactly as they appear.
-4. Insert "[br]" where a line break is necessary to meet the 42-char/2-line limit.
-5. Do not add any conversational filler. Just the data.
+1. Input format: "ID: <id> | Dur: <ms> | Text: <text>". 
+2. Output format: "<id> ||| <Translated Text>".
+3. Keep the ID and " ||| " separator EXACTLY as is.
+4. PRESERVE formatting tags (like <i>, <b>, <font>) exactly as they appear.
+5. Insert "[br]" where a line break is necessary to meet the 42-char/2-line limit.
 
 ${!isRetry ? 'The "PREVIOUS LINES" section is provided for context continuity only.' : ''}
 
@@ -146,8 +175,8 @@ ${previousBlock}LINES TO TRANSLATE:
 ${inputBlock}`;
 
       try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview', 
+        const response = await generateContentWithRetry(ai, {
+            model: modelConfig.modelName, 
             contents: prompt,
             config: { 
                 responseMimeType: "text/plain",
@@ -188,10 +217,6 @@ ${inputBlock}`;
   const linesToRetry: SubtitleLine[] = [];
   const finalResults = new Map<number, string>(initialResults);
 
-  // Heuristics for "Too Long" - Adjusted for the [br] token and 42 char limit
-  // If a line is > 50 chars and has no [br], it's definitely too long.
-  // If total length > 90 chars (approx 2 full lines + overhead), retry.
-  
   initialResults.forEach((translatedText, id) => {
       const len = translatedText.replace('[br]', '').length;
       if (len > 90) {
@@ -201,10 +226,7 @@ ${inputBlock}`;
   });
 
   if (linesToRetry.length > 0) {
-      // Perform a targeted retry for just the problematic lines with strict instructions
-      // Use slightly lower temperature for retry to ensure adherence to rules
       const retryResults = await performTranslation(linesToRetry, true);
-      
       retryResults.forEach((val, key) => {
           finalResults.set(key, val);
       });

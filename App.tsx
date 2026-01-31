@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Type, Cog, X, AlignJustify, AlignLeft } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Type, Cog, X, AlignJustify, AlignLeft, Cpu, FileType, Hourglass } from 'lucide-react';
 import { SubtitleLine, TabView, AssStyleConfig, BatchItem, ModelConfig } from './types';
-import { parseSRT, generateASS, downloadFile, STYLE_PRESETS } from './services/subtitleUtils';
+import { parseSubtitle, generateSubtitleContent, downloadFile, STYLE_PRESETS, calculateSafeDurations } from './services/subtitleUtils';
 import { translateBatch, generateContext, detectLanguage } from './services/geminiService';
+import { saveSession, loadSession, clearSession } from './services/storage';
 import SubtitleSearch from './components/OpenSubtitlesSearch';
 import JSZip from 'jszip';
 
@@ -16,6 +17,12 @@ const AVAILABLE_LANGUAGES = [
     "Indonesian", "Irish", "Italian", "Japanese", "Korean", "Latvian", "Lithuanian", "Maltese", 
     "Polish", "Portuguese", "Romanian", "Slovak", "Slovenian", "Spanish", "Swedish", "Thai", 
     "Turkish", "Ukrainian", "Vietnamese"
+];
+
+const AVAILABLE_MODELS = [
+    { id: 'gemini-3-flash-preview', name: 'Gemini 3.0 Flash (Recommended)' },
+    { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro (High Intelligence)' },
+    { id: 'gemini-flash-lite-latest', name: 'Gemini 2.5 Flash Lite (Fastest)' }
 ];
 
 const KODI_FONTS = [
@@ -59,6 +66,31 @@ const VisualPreview = ({
 
     // Scale factor to simulate TV appearance on a small screen
     const SCALE = 0.5; 
+
+    // If Output is SRT, use a simplified preview
+    if (config.outputFormat === 'srt') {
+        const primaryText = translated || "Translated Subtitle";
+        const secondaryText = original || "Original Subtitle";
+        
+        return (
+            <div style={containerStyle}>
+                <div className="absolute inset-0 pointer-events-none opacity-10" style={{backgroundImage: 'linear-gradient(0deg, transparent 24%, #ffffff 25%, #ffffff 26%, transparent 27%, transparent 74%, #ffffff 75%, #ffffff 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, #ffffff 25%, #ffffff 26%, transparent 27%, transparent 74%, #ffffff 75%, #ffffff 76%, transparent 77%, transparent)', backgroundSize: '50px 50px', zIndex: 1}}></div>
+                <div style={{position: 'absolute', bottom: '10%', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', padding: '0 2rem', zIndex: 10, textAlign: 'center', gap: '8px'}}>
+                    {config.stackOrder === 'primary-top' ? (
+                        <>
+                             <div style={{color: config.primary.color, fontSize: '18px', fontWeight: 'bold'}}>{primaryText}</div>
+                             <div style={{color: config.secondary.color, fontSize: '18px', fontWeight: 'bold'}}>{secondaryText}</div>
+                        </>
+                    ) : (
+                        <>
+                             <div style={{color: config.secondary.color, fontSize: '18px', fontWeight: 'bold'}}>{secondaryText}</div>
+                             <div style={{color: config.primary.color, fontSize: '18px', fontWeight: 'bold'}}>{primaryText}</div>
+                        </>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     const getTextStyle = (isPrimary: boolean) => {
         const style = isPrimary ? config.primary : config.secondary;
@@ -179,12 +211,14 @@ function App() {
   
   // Settings
   const [autoContext, setAutoContext] = useState(true);
+  const [smartTiming, setSmartTiming] = useState(true); // New Toggle
   const [targetLang, setTargetLang] = useState<string>(() => {
       return localStorage.getItem('target_language') || 'Vietnamese';
   });
   
   // Model Configuration State
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
+      modelName: 'gemini-3-flash-preview',
       temperature: 0.3,
       topP: 0.95,
       topK: 40,
@@ -210,6 +244,34 @@ function App() {
   const completedLinesRef = useRef(0);
   const activeLinesRef = useRef(0); // Lines currently being processed by API
   const progressValueRef = useRef(0); // Current displayed float value
+
+  // Session Recovery Effect
+  useEffect(() => {
+    const restoreSession = async () => {
+        const savedItems = await loadSession();
+        if (savedItems && savedItems.length > 0) {
+            setBatchItems(savedItems);
+            // Restore active item if possible
+            if (savedItems.length > 0) {
+                setActiveItemId(savedItems[0].id);
+            }
+        }
+    };
+    restoreSession();
+  }, []);
+
+  // Save Session Effect (Debounced roughly)
+  useEffect(() => {
+      const timeout = setTimeout(() => {
+          if (batchItems.length > 0) {
+              saveSession(batchItems);
+          } else {
+              // Optionally clear if empty, or keep last state
+              // clearSession(); 
+          }
+      }, 1000);
+      return () => clearTimeout(timeout);
+  }, [batchItems]);
 
   // Computed: Active Subtitles for Preview
   const activeItem = batchItems.find(item => item.id === activeItemId) || batchItems[0];
@@ -278,7 +340,8 @@ function App() {
         reader.onload = (e) => {
             const content = e.target?.result as string;
             try {
-                const parsed = parseSRT(content);
+                // Determine format and parse
+                const parsed = parseSubtitle(content, item.fileName);
                 setBatchItems(prev => prev.map(pi => pi.id === item.id ? { 
                     ...pi, 
                     subtitles: parsed, 
@@ -286,6 +349,7 @@ function App() {
                 } : pi));
                 if (!activeItemId) setActiveItemId(item.id);
             } catch (err) {
+                console.error(err);
                 setBatchItems(prev => prev.map(pi => pi.id === item.id ? { 
                     ...pi, 
                     status: 'error', 
@@ -299,7 +363,7 @@ function App() {
 
   const handleSubtitleSelection = (content: string, name: string) => {
       try {
-          const parsed = parseSRT(content);
+          const parsed = parseSubtitle(content, name);
           const newItem: BatchItem = {
               id: crypto.randomUUID(),
               fileName: name,
@@ -412,6 +476,9 @@ function App() {
              console.error("Context gen failed", e);
           }
       }
+      
+      // 3. Pre-calculate Durations for Context Awareness
+      const safeDurations = calculateSafeDurations(item.subtitles);
 
       // Prepare Chunks
       const newSubtitles = [...item.subtitles];
@@ -437,8 +504,15 @@ function App() {
           
           if (linesToTranslate.length > 0) {
               try {
-                // PASS MODEL CONFIG HERE
-                const translations = await translateBatch(linesToTranslate, targetLang, context, previous, modelConfig);
+                // PASS DURATION INFO AND MODEL CONFIG
+                const translations = await translateBatch(
+                    linesToTranslate, 
+                    targetLang, 
+                    context, 
+                    previous, 
+                    modelConfig,
+                    safeDurations
+                );
                 linesToTranslate.forEach(line => {
                     if (translations.has(line.id)) {
                         line.translatedText = translations.get(line.id);
@@ -501,16 +575,21 @@ function App() {
   const handleDownloadSingle = (id: string) => {
       const item = batchItems.find(i => i.id === id);
       if (!item) return;
-      // Always use current styleConfig from state
-      const assContent = generateASS(item.subtitles, styleConfig);
-      let newName = item.fileName.replace(/\.srt$/i, '');
-      downloadFile(assContent, newName + '.ass');
+      
+      // Use unified generator which checks styleConfig.outputFormat and smartTiming
+      const content = generateSubtitleContent(item.subtitles, styleConfig, smartTiming);
+      
+      // Determine extension based on config
+      const ext = styleConfig.outputFormat === 'srt' ? '.srt' : '.ass';
+      
+      let newName = item.fileName.replace(/\.(srt|ass|vtt)$/i, '');
+      downloadFile(content, newName + ext);
   };
 
   const handleDownloadAll = async () => {
       const completedItems = batchItems.filter(i => i.status === 'completed');
       
-      // Smart Download: If only 1 file, download it directly as .ass
+      // Smart Download: If only 1 file, download it directly
       if (completedItems.length === 1) {
           handleDownloadSingle(completedItems[0].id);
           return;
@@ -518,11 +597,13 @@ function App() {
 
       const zip = new JSZip();
       let count = 0;
+      const ext = styleConfig.outputFormat === 'srt' ? '.srt' : '.ass';
+
       completedItems.forEach(item => {
           if (item.subtitles.length > 0) {
-              const assContent = generateASS(item.subtitles, styleConfig);
-              let newName = item.fileName.replace(/\.srt$/i, '') + '.ass';
-              zip.file(newName, assContent);
+              const content = generateSubtitleContent(item.subtitles, styleConfig, smartTiming);
+              let newName = item.fileName.replace(/\.(srt|ass|vtt)$/i, '') + ext;
+              zip.file(newName, content);
               count++;
           }
       });
@@ -549,8 +630,23 @@ function App() {
       });
   };
 
+  const clearAll = () => {
+      if (window.confirm("Clear all files and history?")) {
+        setBatchItems([]);
+        setActiveItemId(null);
+        clearSession();
+      }
+  };
+
   const completedCount = batchItems.filter(i => i.status === 'completed').length;
   const isSingleFileDownload = completedCount === 1;
+
+  // Render download button label
+  const getDownloadLabel = () => {
+      const ext = styleConfig.outputFormat === 'srt' ? '.srt' : '.ass';
+      if (isSingleFileDownload) return `Download ${ext} File`;
+      return `Download All (${completedCount} Files)`;
+  };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
@@ -562,7 +658,7 @@ function App() {
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-tight">DualSub AI</h1>
-              <p className="text-xs text-zinc-400">SRT to Dual-Language ASS Converter</p>
+              <p className="text-xs text-zinc-400">SRT/ASS to Dual-Language ASS/SRT Converter</p>
             </div>
           </div>
           <div className="flex gap-4 items-center">
@@ -591,6 +687,7 @@ function App() {
             <button 
                 onClick={() => setActiveTab(TabView.UPLOAD)}
                 className={`pb-4 px-2 font-medium text-sm transition-colors relative ${activeTab === TabView.UPLOAD ? 'text-yellow-500' : 'text-zinc-400 hover:text-zinc-200'}`}
+                title="Upload .srt, .ass, or .vtt files from your device"
             >
                 Upload & Batch
                 {activeTab === TabView.UPLOAD && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-yellow-500 rounded-t-full" />}
@@ -598,6 +695,7 @@ function App() {
             <button 
                 onClick={() => setActiveTab(TabView.SEARCH)}
                 className={`pb-4 px-2 font-medium text-sm transition-colors relative ${activeTab === TabView.SEARCH ? 'text-yellow-500' : 'text-zinc-400 hover:text-zinc-200'}`}
+                title="Search and download subtitles from online providers"
             >
                 Search Subtitles
                 {activeTab === TabView.SEARCH && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-yellow-500 rounded-t-full" />}
@@ -612,7 +710,7 @@ function App() {
                 <div className={`border-2 border-dashed rounded-xl p-8 transition-colors text-center ${batchItems.length > 0 ? 'border-zinc-700 bg-zinc-900/30' : 'border-zinc-700 hover:border-yellow-500/50 hover:bg-zinc-900'}`}>
                     <input 
                         type="file" 
-                        accept=".srt" 
+                        accept=".srt,.ass,.ssa,.vtt" 
                         multiple 
                         onChange={handleFileUpload}
                         className="hidden" 
@@ -620,22 +718,27 @@ function App() {
                     />
                     
                     {batchItems.length === 0 ? (
-                        <label htmlFor="srt-upload" className="cursor-pointer flex flex-col items-center gap-4">
+                        <label htmlFor="srt-upload" className="cursor-pointer flex flex-col items-center gap-4" title="Click or drag files to upload">
                             <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
                                 <Upload className="w-8 h-8" />
                             </div>
                             <div>
-                                <h3 className="text-lg font-semibold">Drop .srt files here</h3>
-                                <p className="text-zinc-500 mt-1">Supports multiple files for batch processing</p>
+                                <h3 className="text-lg font-semibold">Drop subtitle files here</h3>
+                                <p className="text-zinc-500 mt-1">Supports .srt, .ass, .vtt</p>
                             </div>
                         </label>
                     ) : (
                         <div className="flex flex-col gap-4">
                             <div className="flex justify-between items-center">
                                 <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">File Queue ({batchItems.length})</h3>
-                                <label htmlFor="srt-upload" className="text-xs text-yellow-500 hover:text-yellow-400 cursor-pointer flex items-center gap-1">
-                                    <Upload className="w-3 h-3" /> Add more files
-                                </label>
+                                <div className="flex items-center gap-4">
+                                     <button onClick={clearAll} className="text-xs text-red-500 hover:text-red-400 flex items-center gap-1" title="Remove all files from the queue">
+                                         <Trash2 className="w-3 h-3" /> Clear All
+                                     </button>
+                                     <label htmlFor="srt-upload" className="text-xs text-yellow-500 hover:text-yellow-400 cursor-pointer flex items-center gap-1" title="Add more subtitle files to the batch">
+                                         <Upload className="w-3 h-3" /> Add more files
+                                     </label>
+                                </div>
                             </div>
                             <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
                                 {batchItems.map(item => (
@@ -666,11 +769,11 @@ function App() {
                                         </div>
                                         <div className="flex gap-2">
                                              {item.status === 'completed' && (
-                                                 <button onClick={(e) => {e.stopPropagation(); handleDownloadSingle(item.id)}} className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white" title="Download .ass">
+                                                 <button onClick={(e) => {e.stopPropagation(); handleDownloadSingle(item.id)}} className="p-2 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white" title="Download translated file">
                                                      <DownloadIcon className="w-4 h-4" />
                                                  </button>
                                              )}
-                                             <button onClick={(e) => {e.stopPropagation(); removeBatchItem(item.id)}} className="p-2 hover:bg-red-900/30 rounded text-zinc-600 hover:text-red-400" title="Remove">
+                                             <button onClick={(e) => {e.stopPropagation(); removeBatchItem(item.id)}} className="p-2 hover:bg-red-900/30 rounded text-zinc-600 hover:text-red-400" title="Remove file from queue">
                                                  <Trash2 className="w-4 h-4" />
                                              </button>
                                         </div>
@@ -694,6 +797,7 @@ function App() {
                                     <select 
                                         value={targetLang}
                                         onChange={handleLanguageChange}
+                                        title="Select the language to translate into"
                                         className="bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:border-yellow-500 focus:outline-none"
                                     >
                                         {AVAILABLE_LANGUAGES.map(lang => (
@@ -701,18 +805,36 @@ function App() {
                                         ))}
                                     </select>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <input 
-                                        type="checkbox" 
-                                        id="autoContext" 
-                                        checked={autoContext} 
-                                        onChange={(e) => setAutoContext(e.target.checked)}
-                                        className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 accent-yellow-500"
-                                    />
-                                    <label htmlFor="autoContext" className="text-sm text-zinc-300 flex items-center gap-2 cursor-pointer">
-                                        <Sparkles className="w-3 h-3 text-yellow-500" />
-                                        Auto-Detect Context for each file
-                                    </label>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            type="checkbox" 
+                                            id="autoContext" 
+                                            checked={autoContext} 
+                                            onChange={(e) => setAutoContext(e.target.checked)}
+                                            className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 accent-yellow-500"
+                                            title="Analyze filename to detect movie/show context for better translation"
+                                        />
+                                        <label htmlFor="autoContext" className="text-sm text-zinc-300 flex items-center gap-2 cursor-pointer" title="Analyze filename to detect movie/show context for better translation">
+                                            <Sparkles className="w-3 h-3 text-yellow-500" />
+                                            Use context
+                                        </label>
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-2">
+                                        <input 
+                                            type="checkbox" 
+                                            id="smartTiming" 
+                                            checked={smartTiming} 
+                                            onChange={(e) => setSmartTiming(e.target.checked)}
+                                            className="w-4 h-4 rounded border-zinc-700 bg-zinc-900 accent-yellow-500"
+                                            title="Prevents overlaps and caps duration to 6s"
+                                        />
+                                        <label htmlFor="smartTiming" className="text-sm text-zinc-300 flex items-center gap-2 cursor-pointer" title="Prevents overlaps and caps duration to 6s">
+                                            <Hourglass className="w-3 h-3 text-yellow-500" />
+                                            Smart Timing
+                                        </label>
+                                    </div>
                                 </div>
                              </div>
                         </div>
@@ -721,6 +843,7 @@ function App() {
                             <button
                                 onClick={handleTranslateAll}
                                 disabled={isTranslating.current}
+                                title="Start processing all pending files in the queue"
                                 className={`p-4 rounded-xl border flex items-center justify-center gap-3 transition-all ${
                                     isTranslating.current 
                                     ? 'bg-zinc-800 border-zinc-700 text-zinc-500 cursor-not-allowed'
@@ -738,10 +861,11 @@ function App() {
                                 <button
                                     onClick={handleDownloadAll}
                                     disabled={completedCount === 0}
+                                    title="Download all completed translations as a ZIP file"
                                     className="flex-1 p-4 rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 flex items-center justify-center gap-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <DownloadIcon className="w-5 h-5" /> 
-                                    {isSingleFileDownload ? 'Download .ass File' : `Download All (${completedCount} Files)`}
+                                    {getDownloadLabel()}
                                 </button>
                                 <button 
                                     onClick={() => setShowStyleConfig(!showStyleConfig)}
@@ -764,22 +888,23 @@ function App() {
                                         </h3>
                                         <button 
                                             onClick={resetStyles}
+                                            title="Reset style settings to default"
                                             className="text-xs flex items-center gap-1.5 text-zinc-400 hover:text-white transition-colors px-2 py-1 rounded bg-zinc-800"
                                         >
                                             <RotateCcw className="w-3 h-3" /> Reset
                                         </button>
                                     </div>
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                        <button onClick={() => applyPreset('NETFLIX')} className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-zinc-700 hover:border-red-600 hover:bg-red-600/10 text-xs font-medium transition-all group">
+                                        <button onClick={() => applyPreset('NETFLIX')} title="Apply Netflix-like styling (Standard Sans-Serif)" className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-zinc-700 hover:border-red-600 hover:bg-red-600/10 text-xs font-medium transition-all group">
                                             <Tv className="w-3 h-3 text-red-500 group-hover:text-red-400" /> Netflix Style
                                         </button>
-                                        <button onClick={() => applyPreset('ANIME')} className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-zinc-700 hover:border-pink-500 hover:bg-pink-500/10 text-xs font-medium transition-all group">
+                                        <button onClick={() => applyPreset('ANIME')} title="Apply Anime fansub styling (Styled, specific colors)" className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-zinc-700 hover:border-pink-500 hover:bg-pink-500/10 text-xs font-medium transition-all group">
                                             <Layers className="w-3 h-3 text-pink-500 group-hover:text-pink-400" /> Anime Fansub
                                         </button>
-                                        <button onClick={() => applyPreset('CINEMATIC')} className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-zinc-700 hover:border-amber-400 hover:bg-amber-400/10 text-xs font-medium transition-all group">
+                                        <button onClick={() => applyPreset('CINEMATIC')} title="Apply Cinematic styling (Black bars, narrow font)" className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-zinc-700 hover:border-amber-400 hover:bg-amber-400/10 text-xs font-medium transition-all group">
                                             <Film className="w-3 h-3 text-amber-400 group-hover:text-amber-300" /> Cinematic
                                         </button>
-                                        <button onClick={() => applyPreset('KODI')} className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-zinc-700 hover:border-blue-400 hover:bg-blue-400/10 text-xs font-medium transition-all group">
+                                        <button onClick={() => applyPreset('KODI')} title="Apply Kodi/TV styling (Large, readable, simple)" className="flex items-center justify-center gap-2 py-2 px-3 rounded-lg border border-zinc-700 hover:border-blue-400 hover:bg-blue-400/10 text-xs font-medium transition-all group">
                                             <Monitor className="w-3 h-3 text-blue-400 group-hover:text-blue-300" /> TV / Kodi
                                         </button>
                                     </div>
@@ -790,16 +915,44 @@ function App() {
                                     <div className="space-y-4">
                                         <label className="text-xs text-zinc-400 font-bold uppercase tracking-wider">Layout & Effects</label>
                                         
+                                        <div className="space-y-2">
+                                            <span className="text-xs text-zinc-500">Output Format</span>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <button 
+                                                    onClick={() => setStyleConfig({...styleConfig, outputFormat: 'ass'})}
+                                                    title="Use .ass format for rich styling and positioning"
+                                                    className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 ${styleConfig.outputFormat === 'ass' ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'}`}
+                                                >
+                                                    <FileText className="w-3 h-3" /> Advanced (.ass)
+                                                </button>
+                                                <button 
+                                                    onClick={() => setStyleConfig({...styleConfig, outputFormat: 'srt'})}
+                                                    title="Use .srt format for broad compatibility (limited styling)"
+                                                    className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 ${styleConfig.outputFormat === 'srt' ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'}`}
+                                                >
+                                                    <FileType className="w-3 h-3" /> Standard (.srt)
+                                                </button>
+                                            </div>
+                                            <p className="text-xs text-zinc-600 px-1">
+                                                {styleConfig.outputFormat === 'ass' ? 'Supports precise positioning and styling. Best for PC/VLC.' : 'Standard text format. Supports basic colors only. Best for TVs.'}
+                                            </p>
+                                        </div>
+
                                         <div className="grid grid-cols-2 gap-3">
+                                            {/* Disable Layout Toggle if SRT, as SRT only supports stacked-ish text */}
                                             <button 
                                                 onClick={() => setStyleConfig({...styleConfig, layout: 'stacked'})}
-                                                className={`py-3 px-4 rounded-lg text-sm font-medium border flex items-center justify-center gap-2 ${styleConfig.layout === 'stacked' ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'}`}
+                                                disabled={styleConfig.outputFormat === 'srt'}
+                                                title="Both languages appear at the bottom of the screen"
+                                                className={`py-3 px-4 rounded-lg text-sm font-medium border flex items-center justify-center gap-2 ${styleConfig.layout === 'stacked' ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'} ${styleConfig.outputFormat === 'srt' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                             >
                                                 <Layout className="w-4 h-4 rotate-180" /> Stacked (Bottom)
                                             </button>
                                             <button 
                                                 onClick={() => setStyleConfig({...styleConfig, layout: 'split'})}
-                                                className={`py-3 px-4 rounded-lg text-sm font-medium border flex items-center justify-center gap-2 ${styleConfig.layout === 'split' ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'}`}
+                                                disabled={styleConfig.outputFormat === 'srt'}
+                                                title="One language at top, one at bottom"
+                                                className={`py-3 px-4 rounded-lg text-sm font-medium border flex items-center justify-center gap-2 ${styleConfig.layout === 'split' ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'} ${styleConfig.outputFormat === 'srt' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                             >
                                                 <Layout className="w-4 h-4" /> Split (Top/Bottom)
                                             </button>
@@ -810,12 +963,14 @@ function App() {
                                             <div className="grid grid-cols-2 gap-3">
                                                 <button 
                                                     onClick={() => setStyleConfig({...styleConfig, linesPerSubtitle: 1})}
+                                                    title="Merge text into a single line where possible"
                                                     className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 ${styleConfig.linesPerSubtitle === 1 ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'}`}
                                                 >
                                                     <AlignLeft className="w-3 h-3" /> Single Line
                                                 </button>
                                                 <button 
                                                     onClick={() => setStyleConfig({...styleConfig, linesPerSubtitle: 2})}
+                                                    title="Allow up to 2 lines per subtitle"
                                                     className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 ${styleConfig.linesPerSubtitle === 2 || !styleConfig.linesPerSubtitle ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:bg-zinc-750'}`}
                                                 >
                                                     <AlignJustify className="w-3 h-3" /> Double Line
@@ -827,6 +982,7 @@ function App() {
                                             <span className="text-xs text-zinc-500">Vertical Order (Stack Mode)</span>
                                             <button 
                                                 onClick={() => setStyleConfig({...styleConfig, stackOrder: styleConfig.stackOrder === 'primary-top' ? 'secondary-top' : 'primary-top'})}
+                                                title="Swap vertical position of Original vs Translated text"
                                                 className="w-full py-2 px-3 rounded-lg border border-zinc-700 bg-zinc-800 text-zinc-300 text-sm hover:text-white flex items-center justify-between"
                                             >
                                                 <span>
@@ -836,7 +992,7 @@ function App() {
                                             </button>
                                         </div>
 
-                                        <div className="space-y-4 pt-2 border-t border-zinc-800">
+                                        <div className={`space-y-4 pt-2 border-t border-zinc-800 ${styleConfig.outputFormat === 'srt' ? 'opacity-30 pointer-events-none' : ''}`}>
                                             <div className="space-y-2">
                                                 <div className="flex justify-between">
                                                     <span className="text-xs text-zinc-400">Outline Width</span>
@@ -846,6 +1002,7 @@ function App() {
                                                     type="range" min="0" max="10" step="1"
                                                     value={styleConfig.outlineWidth}
                                                     onChange={(e) => setStyleConfig({...styleConfig, outlineWidth: parseInt(e.target.value)})}
+                                                    title="Adjust the thickness of the text border"
                                                     className="w-full accent-zinc-500 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
                                                 />
                                             </div>
@@ -858,6 +1015,7 @@ function App() {
                                                     type="range" min="0" max="10" step="1"
                                                     value={styleConfig.shadowDepth}
                                                     onChange={(e) => setStyleConfig({...styleConfig, shadowDepth: parseInt(e.target.value)})}
+                                                    title="Adjust the distance of the drop shadow"
                                                     className="w-full accent-zinc-500 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
                                                 />
                                             </div>
@@ -866,25 +1024,32 @@ function App() {
 
                                     {/* Right Column: Typography & Colors */}
                                     <div className="space-y-4">
-                                        <label className="text-xs text-zinc-400 font-bold uppercase tracking-wider">Typography & Colors</label>
+                                        <div className="flex items-center justify-between">
+                                            <label className="text-xs text-zinc-400 font-bold uppercase tracking-wider">Typography & Colors</label>
+                                        </div>
                                         
                                         {/* Primary Style Config */}
                                         <div className="bg-zinc-800/50 p-3 rounded-lg border border-zinc-700/50 space-y-3">
                                             <div className="flex justify-between items-center">
                                                 <span className="text-sm font-medium text-zinc-200">{targetLang}</span>
-                                                <input 
-                                                    type="color" 
-                                                    value={styleConfig.primary.color}
-                                                    onChange={(e) => setStyleConfig({...styleConfig, primary: {...styleConfig.primary, color: e.target.value}})}
-                                                    className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
-                                                />
+                                                <div className="flex items-center gap-2 bg-zinc-900 rounded p-1 border border-zinc-700">
+                                                    <span className="text-xs font-mono text-zinc-400 pl-1">{styleConfig.primary.color.toUpperCase()}</span>
+                                                    <input 
+                                                        type="color" 
+                                                        value={styleConfig.primary.color}
+                                                        onChange={(e) => setStyleConfig({...styleConfig, primary: {...styleConfig.primary, color: e.target.value}})}
+                                                        title="Set color for the translated text"
+                                                        className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                                                    />
+                                                </div>
                                             </div>
-                                            <div className="flex items-center gap-3">
+                                            <div className={`flex items-center gap-3 transition-opacity ${styleConfig.outputFormat === 'srt' ? 'opacity-30 pointer-events-none' : ''}`}>
                                                 <span className="text-xs text-zinc-500 w-12">Size: {styleConfig.primary.fontSize}</span>
                                                 <input 
                                                     type="range" min="30" max="120" step="2"
                                                     value={styleConfig.primary.fontSize}
                                                     onChange={(e) => setStyleConfig({...styleConfig, primary: {...styleConfig.primary, fontSize: parseInt(e.target.value)}})}
+                                                    title="Set font size for the translated text"
                                                     className="flex-1 accent-yellow-500 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
                                                 />
                                             </div>
@@ -894,31 +1059,37 @@ function App() {
                                         <div className="bg-zinc-800/50 p-3 rounded-lg border border-zinc-700/50 space-y-3">
                                             <div className="flex justify-between items-center">
                                                 <span className="text-sm font-medium text-zinc-200">English</span>
-                                                <input 
-                                                    type="color" 
-                                                    value={styleConfig.secondary.color}
-                                                    onChange={(e) => setStyleConfig({...styleConfig, secondary: {...styleConfig.secondary, color: e.target.value}})}
-                                                    className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
-                                                />
+                                                <div className="flex items-center gap-2 bg-zinc-900 rounded p-1 border border-zinc-700">
+                                                    <span className="text-xs font-mono text-zinc-400 pl-1">{styleConfig.secondary.color.toUpperCase()}</span>
+                                                    <input 
+                                                        type="color" 
+                                                        value={styleConfig.secondary.color}
+                                                        onChange={(e) => setStyleConfig({...styleConfig, secondary: {...styleConfig.secondary, color: e.target.value}})}
+                                                        title="Set color for the original text"
+                                                        className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0"
+                                                    />
+                                                </div>
                                             </div>
-                                            <div className="flex items-center gap-3">
+                                            <div className={`flex items-center gap-3 transition-opacity ${styleConfig.outputFormat === 'srt' ? 'opacity-30 pointer-events-none' : ''}`}>
                                                 <span className="text-xs text-zinc-500 w-12">Size: {styleConfig.secondary.fontSize}</span>
                                                 <input 
                                                     type="range" min="30" max="120" step="2"
                                                     value={styleConfig.secondary.fontSize}
                                                     onChange={(e) => setStyleConfig({...styleConfig, secondary: {...styleConfig.secondary, fontSize: parseInt(e.target.value)}})}
+                                                    title="Set font size for the original text"
                                                     className="flex-1 accent-zinc-500 h-1.5 bg-zinc-700 rounded-lg appearance-none cursor-pointer"
                                                 />
                                             </div>
                                         </div>
 
-                                        <div className="space-y-2">
+                                        <div className={`space-y-2 ${styleConfig.outputFormat === 'srt' ? 'opacity-30 pointer-events-none' : ''}`}>
                                             <span className="text-xs text-zinc-500">Font Family</span>
                                             <div className="relative">
                                                 <Type className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                                                 <select 
                                                     value={styleConfig.fontFamily}
                                                     onChange={(e) => setStyleConfig({...styleConfig, fontFamily: e.target.value})}
+                                                    title="Select the font face"
                                                     className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-9 pr-3 py-2 text-sm text-zinc-200 focus:border-yellow-500 focus:outline-none appearance-none"
                                                 >
                                                     {KODI_FONTS.map(font => (
@@ -1025,12 +1196,14 @@ function App() {
                     <div className="flex gap-3 pt-2">
                         <button 
                             onClick={() => confirmationRequest.resolve(false)}
+                            title="Cancel translation"
                             className="flex-1 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg font-medium transition-colors"
                         >
                             Cancel
                         </button>
                         <button 
                             onClick={() => confirmationRequest.resolve(true)}
+                            title="Proceed with translation"
                             className="flex-1 px-4 py-3 bg-amber-500 hover:bg-amber-400 text-black rounded-lg font-bold transition-colors"
                         >
                             Translate Anyway
@@ -1051,12 +1224,30 @@ function App() {
                             </div>
                             <h3 className="text-lg font-bold text-white">Gemini Model Settings</h3>
                         </div>
-                        <button onClick={() => setShowModelSettings(false)} className="text-zinc-500 hover:text-white transition-colors">
+                        <button onClick={() => setShowModelSettings(false)} className="text-zinc-500 hover:text-white transition-colors" title="Close settings">
                             <X className="w-5 h-5" />
                         </button>
                     </div>
 
                     <div className="space-y-5">
+                         {/* Model Selection */}
+                         <div className="space-y-2">
+                             <div className="flex justify-between items-center">
+                                 <label className="text-sm font-medium text-zinc-300">Model Version</label>
+                                 <Cpu className="w-4 h-4 text-yellow-500" />
+                             </div>
+                             <select 
+                                 value={modelConfig.modelName}
+                                 onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})}
+                                 title="Select the AI model version"
+                                 className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:border-yellow-500 focus:outline-none"
+                             >
+                                 {AVAILABLE_MODELS.map(model => (
+                                     <option key={model.id} value={model.id}>{model.name}</option>
+                                 ))}
+                             </select>
+                         </div>
+
                          {/* Temperature */}
                         <div className="space-y-2">
                             <div className="flex justify-between">
@@ -1067,6 +1258,7 @@ function App() {
                                 type="range" min="0" max="1" step="0.1"
                                 value={modelConfig.temperature}
                                 onChange={(e) => setModelConfig({...modelConfig, temperature: parseFloat(e.target.value)})}
+                                title="Control randomness: Higher = Creative, Lower = Precise"
                                 className="w-full accent-yellow-500 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                             />
                             <p className="text-xs text-zinc-500">Higher values mean more creative/random outputs. Lower values are more deterministic.</p>
@@ -1082,6 +1274,7 @@ function App() {
                                 type="range" min="0" max="1" step="0.05"
                                 value={modelConfig.topP}
                                 onChange={(e) => setModelConfig({...modelConfig, topP: parseFloat(e.target.value)})}
+                                title="Nucleus sampling: Controls diversity of word choices"
                                 className="w-full accent-yellow-500 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                             />
                             <p className="text-xs text-zinc-500">Nucleus sampling. Lower values reduce the pool of words considered.</p>
@@ -1097,6 +1290,7 @@ function App() {
                                 type="range" min="1" max="100" step="1"
                                 value={modelConfig.topK}
                                 onChange={(e) => setModelConfig({...modelConfig, topK: parseInt(e.target.value)})}
+                                title="Limits the pool of probable next words"
                                 className="w-full accent-yellow-500 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                             />
                             <p className="text-xs text-zinc-500">Limits the number of highest probability tokens considered for each step.</p>
@@ -1112,6 +1306,7 @@ function App() {
                                 type="range" min="1024" max="8192" step="1024"
                                 value={modelConfig.maxOutputTokens}
                                 onChange={(e) => setModelConfig({...modelConfig, maxOutputTokens: parseInt(e.target.value)})}
+                                title="Maximum length of the generated response"
                                 className="w-full accent-yellow-500 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                             />
                         </div>
@@ -1120,6 +1315,7 @@ function App() {
                     <div className="pt-4 border-t border-zinc-800">
                         <button 
                             onClick={() => setShowModelSettings(false)}
+                            title="Save and close settings"
                             className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg font-medium transition-colors"
                         >
                             Close

@@ -30,6 +30,16 @@ const EXTERNAL_PROVIDERS = [
         name: 'YIFY Subtitles',
         url: (q: string) => `https://yts-subs.com/search/${encodeURIComponent(q)}`,
         desc: 'Movie subtitles source'
+    },
+    {
+        name: 'Podnapisi',
+        url: (q: string) => `https://www.podnapisi.net/subtitles/search/?keywords=${encodeURIComponent(q)}`,
+        desc: 'Community driven, high quality'
+    },
+    {
+        name: 'SubsMax',
+        url: (q: string) => `https://subsmax.com/subtitles-search/${encodeURIComponent(q)}`,
+        desc: 'Subtitle search engine'
     }
 ];
 
@@ -315,18 +325,21 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
             <button 
                 onClick={() => { setProvider('OpenSubtitles'); setResults([]); }}
                 className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'OpenSubtitles' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-400 hover:text-white'}`}
+                title="Search using OpenSubtitles.com API"
             >
                 <Layers className="w-4 h-4" /> OpenSubtitles
             </button>
             <button 
                 onClick={() => { setProvider('Subdl'); setResults([]); }}
                 className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'Subdl' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-400 hover:text-white'}`}
+                title="Search using Subdl.com API"
             >
                 <Layers className="w-4 h-4" /> Subdl
             </button>
             <button 
                 onClick={() => { setProvider('External'); setResults([]); setError(''); }}
                 className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'External' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-400 hover:text-white'}`}
+                title="Get links to external subtitle websites"
             >
                 <Globe className="w-4 h-4" /> External Sites
             </button>
@@ -347,6 +360,7 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                                 placeholder="Enter OpenSubtitles Key"
                                 value={osApiKey}
                                 onChange={handleOsKeyChange}
+                                title="Enter your OpenSubtitles API key here"
                                 className="w-full bg-zinc-900 border border-zinc-700 rounded p-2 text-zinc-200 font-mono text-sm focus:border-yellow-500 focus:outline-none"
                             />
                         </>
@@ -361,6 +375,7 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                                 placeholder="Enter Subdl API Key"
                                 value={subdlApiKey}
                                 onChange={handleSubdlKeyChange}
+                                title="Enter your Subdl API key here"
                                 className="w-full bg-zinc-900 border border-zinc-700 rounded p-2 text-zinc-200 font-mono text-sm focus:border-yellow-500 focus:outline-none"
                             />
                         </>
@@ -386,13 +401,13 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
       {/* Search Controls */}
       <div className="space-y-4">
           <div className="flex gap-2 p-1 bg-zinc-800 rounded-lg w-fit">
-              <button onClick={() => setSearchMode('query')} className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'query' ? 'bg-yellow-500 text-black' : 'text-zinc-400 hover:text-white'}`}>
+              <button onClick={() => setSearchMode('query')} title="Search by movie or show title" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'query' ? 'bg-yellow-500 text-black' : 'text-zinc-400 hover:text-white'}`}>
                   <Search className="w-4 h-4" /> Text
               </button>
-              <button onClick={() => setSearchMode('imdb')} className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'imdb' ? 'bg-yellow-500 text-black' : 'text-zinc-400 hover:text-white'}`}>
+              <button onClick={() => setSearchMode('imdb')} title="Search by IMDB ID (e.g. tt1234567)" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'imdb' ? 'bg-yellow-500 text-black' : 'text-zinc-400 hover:text-white'}`}>
                   <Clapperboard className="w-4 h-4" /> IMDB
               </button>
-              <button onClick={() => setSearchMode('tmdb')} className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'tmdb' ? 'bg-yellow-500 text-black' : 'text-zinc-400 hover:text-white'}`}>
+              <button onClick={() => setSearchMode('tmdb')} title="Search by TMDB ID" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'tmdb' ? 'bg-yellow-500 text-black' : 'text-zinc-400 hover:text-white'}`}>
                   <Film className="w-4 h-4" /> TMDB
               </button>
           </div>
@@ -408,18 +423,20 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                         searchMode === 'tmdb' ? "27205" :
                         "Search movie/show..."
                     }
+                    title="Enter search terms"
                     className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 focus:border-yellow-500 focus:outline-none"
                 />
                 
                 <div className="flex gap-2">
-                    <input type="number" min="1" value={season} onChange={(e) => setSeason(e.target.value)} placeholder="S" className="w-16 bg-zinc-900 border border-zinc-700 rounded-lg text-center focus:border-yellow-500 focus:outline-none" title="Season" />
-                    <input type="number" min="1" value={episode} onChange={(e) => setEpisode(e.target.value)} placeholder="E" className="w-16 bg-zinc-900 border border-zinc-700 rounded-lg text-center focus:border-yellow-500 focus:outline-none" title="Episode" />
+                    <input type="number" min="1" value={season} onChange={(e) => setSeason(e.target.value)} placeholder="S" className="w-16 bg-zinc-900 border border-zinc-700 rounded-lg text-center focus:border-yellow-500 focus:outline-none" title="Season number (optional)" />
+                    <input type="number" min="1" value={episode} onChange={(e) => setEpisode(e.target.value)} placeholder="E" className="w-16 bg-zinc-900 border border-zinc-700 rounded-lg text-center focus:border-yellow-500 focus:outline-none" title="Episode number (optional)" />
                 </div>
 
                 {provider !== 'External' && (
                     <button
                         type="submit"
                         disabled={loading || !getApiKey()}
+                        title="Search for subtitles"
                         className="bg-yellow-500 text-black font-semibold px-6 py-3 rounded-lg hover:bg-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                     >
                         {loading ? '...' : <Search className="w-5 h-5" />}
@@ -437,12 +454,14 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                             onClick={() => {
                                 setQuery(histItem);
                             }}
+                            title="Click to search again"
                             className="bg-zinc-800 text-zinc-300 px-2 py-1 rounded-md border border-zinc-700 hover:border-yellow-500/50 hover:text-white cursor-pointer flex items-center gap-1 group transition-colors"
                         >
                             <span>{histItem}</span>
                             <span 
                                 onClick={(e) => removeFromHistory(e, histItem)}
                                 className="text-zinc-500 hover:text-red-400 p-0.5 rounded-full"
+                                title="Remove from history"
                             >
                                 <X className="w-3 h-3" />
                             </span>
@@ -462,6 +481,7 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                     href={site.url(query)}
                     target="_blank"
                     rel="noopener noreferrer"
+                    title="Open external site in new tab"
                     className="bg-zinc-800 p-4 rounded-lg border border-zinc-700 hover:border-yellow-500 hover:bg-zinc-750 transition-all group flex justify-between items-center"
                   >
                       <div>
@@ -512,6 +532,7 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                 <button
                     onClick={() => handleDownload(item)}
                     disabled={!!downloading}
+                    title="Download and import this subtitle"
                     className="bg-zinc-700 hover:bg-zinc-600 text-white px-4 py-2 rounded flex-shrink-0 flex items-center gap-2 transition-colors min-w-[100px] justify-center"
                 >
                     {downloading === item.id ? 'Loading...' : <><Download className="w-4 h-4" /> Get</>}

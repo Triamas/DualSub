@@ -67,6 +67,7 @@ export enum TabView {
 }
 
 export interface AssStyleConfig {
+    outputFormat: 'ass' | 'srt'; // New field for Export Pattern
     layout: 'stacked' | 'split'; // Stacked (both bottom) or Split (one top, one bottom)
     stackOrder: 'primary-top' | 'secondary-top'; // Which language sits on top in stacked mode
     primary: {
@@ -85,6 +86,7 @@ export interface AssStyleConfig {
 }
 
 export interface ModelConfig {
+    modelName: string;
     temperature: number;
     topP: number;
     topK: number;
