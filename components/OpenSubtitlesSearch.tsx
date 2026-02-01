@@ -318,27 +318,27 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
   return (
     <div className="space-y-6">
       {/* Provider & API Key Section */}
-      <div className="bg-zinc-800 p-4 rounded-lg border border-zinc-700 space-y-4">
+      <div className="bg-zinc-100 dark:bg-zinc-800 p-4 rounded-lg border border-zinc-200 dark:border-zinc-700 space-y-4 transition-colors duration-300">
         
         {/* Provider Tabs */}
-        <div className="flex gap-4 border-b border-zinc-700 pb-2">
+        <div className="flex gap-4 border-b border-zinc-200 dark:border-zinc-700 pb-2">
             <button 
                 onClick={() => { setProvider('OpenSubtitles'); setResults([]); }}
-                className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'OpenSubtitles' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-400 hover:text-white'}`}
+                className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'OpenSubtitles' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
                 title="Search using OpenSubtitles.com API"
             >
                 <Layers className="w-4 h-4" /> OpenSubtitles
             </button>
             <button 
                 onClick={() => { setProvider('Subdl'); setResults([]); }}
-                className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'Subdl' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-400 hover:text-white'}`}
+                className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'Subdl' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
                 title="Search using Subdl.com API"
             >
                 <Layers className="w-4 h-4" /> Subdl
             </button>
             <button 
                 onClick={() => { setProvider('External'); setResults([]); setError(''); }}
-                className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'External' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-400 hover:text-white'}`}
+                className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'External' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
                 title="Get links to external subtitle websites"
             >
                 <Globe className="w-4 h-4" /> External Sites
@@ -347,13 +347,13 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
 
         {provider !== 'External' && (
             <div className="flex items-start gap-3">
-                <Key className="w-5 h-5 text-yellow-400 mt-1 flex-shrink-0" />
+                <Key className="w-5 h-5 text-yellow-500 dark:text-yellow-400 mt-1 flex-shrink-0" />
                 <div className="flex-1">
                     {provider === 'OpenSubtitles' ? (
                         <>
-                            <h3 className="font-semibold text-zinc-100">OpenSubtitles Consumer Key</h3>
-                            <p className="text-sm text-zinc-400 mb-2">
-                                Get one from <a href="https://www.opensubtitles.com/en/consumers" target="_blank" className="text-yellow-400 hover:underline">opensubtitles.com</a>.
+                            <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">OpenSubtitles Consumer Key</h3>
+                            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-2">
+                                Get one from <a href="https://www.opensubtitles.com/en/consumers" target="_blank" className="text-yellow-600 dark:text-yellow-400 hover:underline">opensubtitles.com</a>.
                             </p>
                             <input
                                 type="password"
@@ -361,14 +361,14 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                                 value={osApiKey}
                                 onChange={handleOsKeyChange}
                                 title="Enter your OpenSubtitles API key here"
-                                className="w-full bg-zinc-900 border border-zinc-700 rounded p-2 text-zinc-200 font-mono text-sm focus:border-yellow-500 focus:outline-none"
+                                className="w-full bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded p-2 text-zinc-900 dark:text-zinc-200 font-mono text-sm focus:border-yellow-500 focus:outline-none transition-colors"
                             />
                         </>
                     ) : (
                         <>
-                            <h3 className="font-semibold text-zinc-100">Subdl API Key</h3>
-                            <p className="text-sm text-zinc-400 mb-2">
-                                Get one from <a href="https://subdl.com/panel/api" target="_blank" className="text-yellow-400 hover:underline">subdl.com/panel/api</a>.
+                            <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Subdl API Key</h3>
+                            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-2">
+                                Get one from <a href="https://subdl.com/panel/api" target="_blank" className="text-yellow-600 dark:text-yellow-400 hover:underline">subdl.com/panel/api</a>.
                             </p>
                             <input
                                 type="password"
@@ -376,7 +376,7 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                                 value={subdlApiKey}
                                 onChange={handleSubdlKeyChange}
                                 title="Enter your Subdl API key here"
-                                className="w-full bg-zinc-900 border border-zinc-700 rounded p-2 text-zinc-200 font-mono text-sm focus:border-yellow-500 focus:outline-none"
+                                className="w-full bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded p-2 text-zinc-900 dark:text-zinc-200 font-mono text-sm focus:border-yellow-500 focus:outline-none transition-colors"
                             />
                         </>
                     )}
@@ -386,10 +386,10 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
         
         {provider === 'External' && (
              <div className="flex items-start gap-3">
-                <LogOut className="w-5 h-5 text-yellow-400 mt-1 flex-shrink-0" />
+                <LogOut className="w-5 h-5 text-yellow-500 dark:text-yellow-400 mt-1 flex-shrink-0" />
                 <div className="flex-1">
-                    <h3 className="font-semibold text-zinc-100">Manual Search</h3>
-                    <p className="text-sm text-zinc-400">
+                    <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">Manual Search</h3>
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400">
                         These sites do not provide a public API for apps. We will generate search links for you. 
                         Download the .srt file manually, then switch to the <strong>Upload File</strong> tab to process it.
                     </p>
@@ -400,14 +400,14 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
 
       {/* Search Controls */}
       <div className="space-y-4">
-          <div className="flex gap-2 p-1 bg-zinc-800 rounded-lg w-fit">
-              <button onClick={() => setSearchMode('query')} title="Search by movie or show title" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'query' ? 'bg-yellow-500 text-black' : 'text-zinc-400 hover:text-white'}`}>
+          <div className="flex gap-2 p-1 bg-zinc-200 dark:bg-zinc-800 rounded-lg w-fit transition-colors">
+              <button onClick={() => setSearchMode('query')} title="Search by movie or show title" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'query' ? 'bg-yellow-500 text-black' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}>
                   <Search className="w-4 h-4" /> Text
               </button>
-              <button onClick={() => setSearchMode('imdb')} title="Search by IMDB ID (e.g. tt1234567)" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'imdb' ? 'bg-yellow-500 text-black' : 'text-zinc-400 hover:text-white'}`}>
+              <button onClick={() => setSearchMode('imdb')} title="Search by IMDB ID (e.g. tt1234567)" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'imdb' ? 'bg-yellow-500 text-black' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}>
                   <Clapperboard className="w-4 h-4" /> IMDB
               </button>
-              <button onClick={() => setSearchMode('tmdb')} title="Search by TMDB ID" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'tmdb' ? 'bg-yellow-500 text-black' : 'text-zinc-400 hover:text-white'}`}>
+              <button onClick={() => setSearchMode('tmdb')} title="Search by TMDB ID" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'tmdb' ? 'bg-yellow-500 text-black' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}>
                   <Film className="w-4 h-4" /> TMDB
               </button>
           </div>
@@ -424,12 +424,12 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                         "Search movie/show..."
                     }
                     title="Enter search terms"
-                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 focus:border-yellow-500 focus:outline-none"
+                    className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg px-4 py-3 text-zinc-900 dark:text-zinc-100 focus:border-yellow-500 focus:outline-none transition-colors"
                 />
                 
                 <div className="flex gap-2">
-                    <input type="number" min="1" value={season} onChange={(e) => setSeason(e.target.value)} placeholder="S" className="w-16 bg-zinc-900 border border-zinc-700 rounded-lg text-center focus:border-yellow-500 focus:outline-none" title="Season number (optional)" />
-                    <input type="number" min="1" value={episode} onChange={(e) => setEpisode(e.target.value)} placeholder="E" className="w-16 bg-zinc-900 border border-zinc-700 rounded-lg text-center focus:border-yellow-500 focus:outline-none" title="Episode number (optional)" />
+                    <input type="number" min="1" value={season} onChange={(e) => setSeason(e.target.value)} placeholder="S" className="w-16 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg text-center text-zinc-900 dark:text-zinc-100 focus:border-yellow-500 focus:outline-none transition-colors" title="Season number (optional)" />
+                    <input type="number" min="1" value={episode} onChange={(e) => setEpisode(e.target.value)} placeholder="E" className="w-16 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg text-center text-zinc-900 dark:text-zinc-100 focus:border-yellow-500 focus:outline-none transition-colors" title="Episode number (optional)" />
                 </div>
 
                 {provider !== 'External' && (
@@ -447,7 +447,7 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
             {/* Search History Tag Cloud */}
             {history.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="text-zinc-500 text-xs flex items-center gap-1"><Clock className="w-3 h-3"/> Recent:</span>
+                    <span className="text-zinc-500 dark:text-zinc-500 text-xs flex items-center gap-1"><Clock className="w-3 h-3"/> Recent:</span>
                     {history.map((histItem, idx) => (
                         <div 
                             key={idx}
@@ -455,12 +455,12 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                                 setQuery(histItem);
                             }}
                             title="Click to search again"
-                            className="bg-zinc-800 text-zinc-300 px-2 py-1 rounded-md border border-zinc-700 hover:border-yellow-500/50 hover:text-white cursor-pointer flex items-center gap-1 group transition-colors"
+                            className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 hover:border-yellow-500/50 hover:text-zinc-900 dark:hover:text-white cursor-pointer flex items-center gap-1 group transition-colors"
                         >
                             <span>{histItem}</span>
                             <span 
                                 onClick={(e) => removeFromHistory(e, histItem)}
-                                className="text-zinc-500 hover:text-red-400 p-0.5 rounded-full"
+                                className="text-zinc-400 dark:text-zinc-500 hover:text-red-500 dark:hover:text-red-400 p-0.5 rounded-full"
                                 title="Remove from history"
                             >
                                 <X className="w-3 h-3" />
@@ -482,13 +482,13 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Open external site in new tab"
-                    className="bg-zinc-800 p-4 rounded-lg border border-zinc-700 hover:border-yellow-500 hover:bg-zinc-750 transition-all group flex justify-between items-center"
+                    className="bg-zinc-100 dark:bg-zinc-800 p-4 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:border-yellow-500 hover:bg-zinc-50 dark:hover:bg-zinc-750 transition-all group flex justify-between items-center"
                   >
                       <div>
-                          <h4 className="font-semibold text-lg text-zinc-100 group-hover:text-yellow-400 transition-colors">{site.name}</h4>
-                          <p className="text-sm text-zinc-400">{site.desc}</p>
+                          <h4 className="font-semibold text-lg text-zinc-900 dark:text-zinc-100 group-hover:text-yellow-600 dark:group-hover:text-yellow-400 transition-colors">{site.name}</h4>
+                          <p className="text-sm text-zinc-500 dark:text-zinc-400">{site.desc}</p>
                       </div>
-                      <ExternalLink className="w-5 h-5 text-zinc-500 group-hover:text-yellow-500" />
+                      <ExternalLink className="w-5 h-5 text-zinc-400 dark:text-zinc-500 group-hover:text-yellow-500" />
                   </a>
               ))}
           </div>
@@ -496,14 +496,14 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
       
       {/* API Error & Fallback */}
       {error && provider !== 'External' && (
-        <div className="bg-red-900/20 border border-red-800 text-red-200 p-4 rounded-lg flex flex-col gap-2">
+        <div className="bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-200 p-4 rounded-lg flex flex-col gap-2">
             <div className="flex items-center gap-2">
                 <AlertCircle className="w-5 h-5 flex-shrink-0" />
                 <span>{error}</span>
             </div>
             {manualDownloadLink && (
                 <div className="ml-7 mt-1">
-                    <a href={manualDownloadLink.url} download className="text-yellow-400 hover:underline font-medium inline-flex items-center gap-1">
+                    <a href={manualDownloadLink.url} download className="text-yellow-600 dark:text-yellow-400 hover:underline font-medium inline-flex items-center gap-1">
                         <Download className="w-4 h-4" /> Download manually
                     </a>
                 </div>
@@ -515,25 +515,25 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
       {provider !== 'External' && (
           <div className="space-y-3">
             {results.map((item) => (
-            <div key={item.id} className="bg-zinc-800/50 p-4 rounded-lg border border-zinc-700 flex justify-between items-center hover:bg-zinc-800 transition-colors">
+            <div key={item.id} className="bg-white dark:bg-zinc-800/50 p-4 rounded-lg border border-zinc-200 dark:border-zinc-700 flex justify-between items-center hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
                 <div className="overflow-hidden pr-4">
                 <div className="flex items-center gap-2">
-                    <h4 className="font-medium text-lg text-zinc-100 truncate">{item.title}</h4>
-                    <span className="text-xs bg-zinc-700 text-zinc-300 px-1.5 rounded">{item.provider}</span>
+                    <h4 className="font-medium text-lg text-zinc-900 dark:text-zinc-100 truncate">{item.title}</h4>
+                    <span className="text-xs bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 px-1.5 rounded">{item.provider}</span>
                 </div>
-                <div className="flex flex-wrap gap-4 text-sm text-zinc-400 mt-1">
-                    <span className="bg-zinc-700/50 px-2 py-0.5 rounded text-xs border border-zinc-600 uppercase">{item.format}</span>
+                <div className="flex flex-wrap gap-4 text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                    <span className="bg-zinc-100 dark:bg-zinc-700/50 px-2 py-0.5 rounded text-xs border border-zinc-300 dark:border-zinc-600 uppercase">{item.format}</span>
                     {item.downloadCount !== undefined && <span>DLs: {item.downloadCount}</span>}
                     {item.score !== undefined && <span>Score: {item.score}</span>}
                     {item.uploadDate && <span>{new Date(item.uploadDate).toLocaleDateString()}</span>}
-                    {item.hearingImpaired && <span className="text-yellow-500/80" title="Hearing Impaired">HI</span>}
+                    {item.hearingImpaired && <span className="text-yellow-600 dark:text-yellow-500/80" title="Hearing Impaired">HI</span>}
                 </div>
                 </div>
                 <button
                     onClick={() => handleDownload(item)}
                     disabled={!!downloading}
                     title="Download and import this subtitle"
-                    className="bg-zinc-700 hover:bg-zinc-600 text-white px-4 py-2 rounded flex-shrink-0 flex items-center gap-2 transition-colors min-w-[100px] justify-center"
+                    className="bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600 text-zinc-900 dark:text-white px-4 py-2 rounded flex-shrink-0 flex items-center gap-2 transition-colors min-w-[100px] justify-center"
                 >
                     {downloading === item.id ? 'Loading...' : <><Download className="w-4 h-4" /> Get</>}
                 </button>

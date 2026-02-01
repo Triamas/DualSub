@@ -50,6 +50,13 @@ export interface OpenSubtitlesResult {
   };
 }
 
+export interface LogEntry {
+    timestamp: number;
+    type: 'info' | 'request' | 'response' | 'error';
+    message: string;
+    data?: any;
+}
+
 export interface BatchItem {
     id: string;
     fileName: string;
@@ -59,6 +66,8 @@ export interface BatchItem {
     progress: number;
     message?: string;
     context?: string; // Specific context for this file
+    showBible?: string; // Character mappings and pronouns
+    logs: LogEntry[]; // Realtime logs
 }
 
 export enum TabView {
@@ -91,4 +100,5 @@ export interface ModelConfig {
     topP: number;
     topK: number;
     maxOutputTokens: number;
+    useSimulation?: boolean; // New Flag for Mock Mode
 }
