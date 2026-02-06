@@ -1,4 +1,5 @@
-import { GoogleGenAI } from "@google/genai";
+
+import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { SubtitleLine, ModelConfig } from "../types";
 
 const getClient = () => {
@@ -132,7 +133,7 @@ const queryAI = async (
     const ai = getClient();
     try {
         // 45 Seconds Hard Timeout for Gemini API calls
-        const response = await callWithTimeout(ai.models.generateContent({
+        const response = await callWithTimeout<GenerateContentResponse>(ai.models.generateContent({
             model: config.modelName,
             contents: prompt,
             config: {
