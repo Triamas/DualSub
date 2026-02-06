@@ -1,12 +1,13 @@
 # DualSub AI
 
-DualSub AI is a modern web application designed to create professional dual-language subtitles. It retrieves or accepts English SRT files, translates them using Google's advanced Gemini models, and formats them into the ASS (Advanced Substation Alpha) format for a seamless viewing experience.
+DualSub AI is a modern web application designed to create professional dual-language subtitles. It retrieves or accepts English SRT files, translates them using Google's advanced Gemini models or Local LLMs, and formats them into the ASS (Advanced Substation Alpha) format for a seamless viewing experience.
 
 ## Features
 
 ### 🤖 AI-Powered Translation
-- **Engine**: Powered by Google Gemini (`gemini-3-flash-preview`).
+- **Multi-Provider Support**: Switch between **Google Gemini** (`gemini-3-flash`, `pro`) and **Local LLMs** (via OpenAI-compatible endpoints like Ollama, Llama.cpp, LM Studio).
 - **Context-Aware**: Generates translation context based on filenames to ensure correct tone and pronoun usage (specifically optimized for Vietnamese pronouns).
+- **Smart Caching**: Automatically identifies show titles and caches plot context and character glossaries locally (IndexedDB). This ensures consistency across episodes and saves API tokens.
 - **Length Control**: Intelligent retry logic ensures translations fit within readable time constraints, condensing text when necessary.
 - **Batch Processing**: Upload and translate multiple subtitle files simultaneously with a visual queue and ZIP export.
 
@@ -23,20 +24,54 @@ DualSub AI is a modern web application designed to create professional dual-lang
 - **Typography**: Select from standard media player fonts (Arial, Teletext, Trebuchet, etc.) with granular control over colors, sizes, and shadows.
 - **Timing Optimization**: Algorithms to prevent subtitle overlap and ensure minimum display durations.
 
-## Usage Guide
+## Installation & Local Setup
 
-1.  **Load Subtitles**:
-    -   Navigate to **Upload & Batch** to drop one or multiple `.srt` files.
-    -   Or use **Search Subtitles** to find and download subtitles directly within the app.
-2.  **Configure Translation**:
-    -   Select your **Target Language** (e.g., Vietnamese, Spanish, German).
-    -   Check **Auto-Detect Context** to let AI analyze the filename for better accuracy.
-3.  **Translate**:
-    -   Click **Translate All Pending** to start the batch queue. You can monitor progress for each file in real-time.
-4.  **Style & Export**:
-    -   Click the **Settings** (slider icon) to adjust colors, fonts, and layout, or pick a Preset.
-    -   Preview the result in the embedded viewer.
-    -   Click **Download .ass File** (or Download All for ZIPs) to save your dual-language subtitles.
+### Prerequisites
+- **Node.js** (v18 or higher)
+- **Google GenAI API Key** (for Gemini features)
+
+### Quick Start
+
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/yourusername/dualsub-ai.git
+    cd dualsub-ai
+    ```
+
+2.  **Install Dependencies**
+    ```bash
+    npm install
+    ```
+
+3.  **Environment Configuration**
+    Create a `.env` file in the root directory:
+    ```env
+    # Required for Gemini features
+    API_KEY=your_google_genai_api_key_here
+    ```
+    *(Note: If using Vite, ensure `process.env.API_KEY` is handled via `define` in `vite.config.ts` or similar bundler configuration)*
+
+4.  **Run Development Server**
+    ```bash
+    npm run dev
+    ```
+    Open your browser to `http://localhost:5173` (or the port shown in terminal).
+
+### Running with Local LLMs
+
+To use local models (Llama 3, Gemma 2, Mistral, etc.) instead of Gemini:
+
+1.  **Set up an Inference Server**:
+    You need an OpenAI-compatible endpoint. Common options:
+    -   **Ollama**: `ollama serve` (Default port 11434)
+    -   **Llama.cpp**: `./server -m model.gguf -c 8192 --port 8080`
+    -   **LM Studio**: Start Local Server (Default port 1234)
+
+2.  **Configure App**:
+    -   Click the **Settings (Cog Icon)** in the top right.
+    -   Switch Provider to **Local LLM**.
+    -   Enter your endpoint URL (e.g., `http://127.0.0.1:11434/v1/chat/completions` for Ollama).
+    -   (Optional) Enter a model name if your server requires it.
 
 ## Player Support
 
@@ -46,11 +81,6 @@ The generated `.ass` files allow for complex formatting that standard `.srt` fil
 - **Linux**: MPV, VLC.
 - **Android/TV**: Kodi, Nova Video Player, VLC.
 
-## API Configuration
-
-- **Gemini API**: The application requires a Google GenAI API key set in the environment (`process.env.API_KEY`).
-- **Subtitle Search**: To use the search feature, enter your personal API keys for OpenSubtitles or Subdl in the settings panel of the Search tab.
-
 ## Technologies
 
-Built with React, TypeScript, Tailwind CSS, and the Google GenAI SDK.
+Built with React, TypeScript, Tailwind CSS, IndexedDB, and the Google GenAI SDK.

@@ -24,56 +24,196 @@ const callWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promi
 };
 
 /**
- * Helper: Retry mechanism for API calls with exponential backoff for 429 errors.
- * Includes a 45s hard timeout per attempt.
- * Detects TERMINAL errors to stop retrying immediately.
+ * Helper to parse JSON from LLM response (robust against Markdown code blocks)
  */
-const generateContentWithRetry = async (ai: GoogleGenAI, params: any, retries = 3): Promise<any> => {
-  try {
-    // 45 Seconds Hard Timeout for API calls
-    return await callWithTimeout(ai.models.generateContent(params), 45000);
-  } catch (e: any) {
-    const status = e.status;
-    const msg = e.message?.toLowerCase() || "";
+const parseJSONResponse = (text: string): Record<string, string> => {
+    try {
+        let clean = text.trim();
+        // Remove Markdown code blocks if present
+        clean = clean.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '');
+        
+        // Find the first '{' and last '}' to isolate the JSON object
+        const firstOpen = clean.indexOf('{');
+        const lastClose = clean.lastIndexOf('}');
+        
+        if (firstOpen !== -1 && lastClose !== -1 && lastClose > firstOpen) {
+            clean = clean.substring(firstOpen, lastClose + 1);
+        }
 
-    // 1. TERMINAL ERRORS: Do not retry these.
-    if (status === 400 || status === 401 || status === 403) {
-        throw new Error(`TERMINAL: API Key Invalid or Permission Denied (${status})`);
+        return JSON.parse(clean);
+    } catch (e) {
+        console.warn("JSON Parse Warning: output might be malformed", e);
+        // Fallback: If strict parsing fails, return empty object (caller will handle missing keys)
+        return {};
     }
-    // Check for specific Quota/Billing messages in the error text
-    if (msg.includes("quota") || msg.includes("exhausted") || msg.includes("billing")) {
-        throw new Error(`TERMINAL: Quota Exceeded. Check your API billing.`);
+};
+
+/**
+ * Call Local LLM (OpenAI Compatible)
+ */
+const generateLocalContent = async (config: ModelConfig, prompt: string, systemInstruction?: string): Promise<string> => {
+    const endpoint = config.localEndpoint || 'http://127.0.0.1:8080/v1/chat/completions';
+    
+    // Fallback model name if empty
+    const model = config.modelName || 'local-model';
+
+    const messages = [];
+    if (systemInstruction) {
+        messages.push({ role: 'system', content: systemInstruction });
+    }
+    messages.push({ role: 'user', content: prompt });
+
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: model,
+                messages: messages,
+                temperature: config.temperature,
+                top_p: config.topP,
+                max_tokens: config.maxOutputTokens
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Local LLM Error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        return data.choices?.[0]?.message?.content || "";
+    } catch (e: any) {
+        console.error("Local LLM Call Failed", e);
+        throw new Error(`Local LLM Connection Failed: ${e.message}`);
+    }
+};
+
+/**
+ * Unified generation function that switches between Gemini and Local.
+ */
+const queryAI = async (
+    prompt: string, 
+    config: ModelConfig = { 
+        provider: 'gemini',
+        modelName: 'gemini-3-flash-preview', 
+        temperature: 0.3, 
+        topP: 0.95, 
+        topK: 40, 
+        maxOutputTokens: 8192,
+        useSimulation: false
+    },
+    systemInstruction?: string
+): Promise<string> => {
+
+    // 1. Simulation Mode
+    if (config.useSimulation) {
+        await new Promise(r => setTimeout(r, 1000));
+        // If the prompt looks like JSON (starts with TASK: JSON), return mock JSON
+        if (prompt.includes("TASK: JSON-to-JSON")) {
+             // Extract IDs roughly
+             const ids: string[] = prompt.match(/"id_\d+"/g) || [];
+             const mockObj: any = {};
+             ids.forEach(id => {
+                 mockObj[id.replace(/"/g, '')] = "[SIMULATED TRANSLATION]";
+             });
+             return JSON.stringify(mockObj, null, 2);
+        }
+        return "SIMULATION RESPONSE: " + prompt.substring(0, 50) + "...";
     }
 
-    // 2. RETRYABLE ERRORS: Rate Limits, Server Overload, Timeouts
-    const isRateLimit = status === 429 || status === 503;
-    const isTimeout = msg === "request_timeout";
-
-    if ((isRateLimit || isTimeout) && retries > 0) {
-      const waitTime = Math.pow(2, 4 - retries) * 1000; // 2s, 4s, 8s
-      const reason = isTimeout ? "Timeout" : "Rate Limit";
-      console.warn(`API ${reason}. Retrying in ${waitTime}ms...`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-      return generateContentWithRetry(ai, params, retries - 1);
+    // 2. Local LLM
+    if (config.provider === 'local') {
+        return await callWithTimeout(generateLocalContent(config, prompt, systemInstruction), 120000); // 2 min timeout for local
     }
-    throw e;
-  }
+
+    // 3. Gemini (Cloud)
+    const ai = getClient();
+    try {
+        // 45 Seconds Hard Timeout for Gemini API calls
+        const response = await callWithTimeout(ai.models.generateContent({
+            model: config.modelName,
+            contents: prompt,
+            config: {
+                responseMimeType: "text/plain", // We parse JSON manually for robustness
+                systemInstruction: systemInstruction,
+                temperature: config.temperature,
+                topP: config.topP,
+                topK: config.topK,
+                maxOutputTokens: config.maxOutputTokens
+            }
+        }), 45000);
+        
+        return response.text || "";
+    } catch (e: any) {
+        // Standard Gemini Error Handling
+        const status = e.status;
+        const msg = e.message?.toLowerCase() || "";
+
+        if (status === 400 || status === 401 || status === 403) {
+            throw new Error(`TERMINAL: API Key Invalid or Permission Denied (${status})`);
+        }
+        if (msg.includes("quota") || msg.includes("exhausted") || msg.includes("billing")) {
+            throw new Error(`TERMINAL: Quota Exceeded. Check your API billing.`);
+        }
+        throw e;
+    }
+};
+
+/**
+ * Identifies the Show Name from a filename for caching purposes.
+ */
+export const identifyShowName = async (filename: string, useSimulation: boolean = false, providerConfig?: ModelConfig): Promise<string> => {
+    const config = providerConfig || { 
+        provider: 'gemini', 
+        modelName: 'gemini-3-flash-preview', 
+        temperature: 0.3, topP: 0.95, topK: 40, maxOutputTokens: 100,
+        useSimulation 
+    };
+
+    if (config.useSimulation) {
+        await new Promise(r => setTimeout(r, 500));
+        return "Simulated Show Title";
+    }
+
+    try {
+        const prompt = `Extract the official Movie or TV Show title from this filename: "${filename}". 
+        
+        Rules:
+        1. Return ONLY the title.
+        2. Remove season/episode numbers, quality tags (1080p), and format extensions.
+        3. Do not add quotes or punctuation.
+        
+        Example: "Breaking.Bad.S01E05.720p.mkv" -> "Breaking Bad"`;
+
+        const result = await queryAI(prompt, config);
+        return result.trim().replace(/['"]/g, '');
+    } catch (error) {
+        console.warn("Show identification failed, using filename as key", error);
+        return filename;
+    }
 };
 
 /**
  * Generates a translation context description based on the filename.
  */
-export const generateContext = async (filename: string, useSimulation: boolean = false): Promise<string> => {
-    if (useSimulation) {
+export const generateContext = async (filename: string, useSimulation: boolean = false, providerConfig?: ModelConfig): Promise<string> => {
+    // Basic mock config if none provided, preserving simulation flag
+    const config = providerConfig || { 
+        provider: 'gemini', 
+        modelName: 'gemini-3-flash-preview', 
+        temperature: 0.3, topP: 0.95, topK: 40, maxOutputTokens: 1024,
+        useSimulation 
+    };
+
+    if (config.useSimulation) {
         await new Promise(r => setTimeout(r, 1000));
         return "SIMULATION: This is a generated context for testing purposes. It simulates a plot summary derived from the filename.";
     }
 
-    const ai = getClient();
     try {
-        const response = await generateContentWithRetry(ai, {
-            model: 'gemini-3-flash-preview',
-            contents: `Identify the movie or TV show from this filename: "${filename}". 
+        const prompt = `Identify the movie or TV show from this filename: "${filename}". 
             
             Output ONLY a concise 2-3 sentence summary of the plot and main character dynamics.
             
@@ -81,12 +221,9 @@ export const generateContext = async (filename: string, useSimulation: boolean =
             1. No "Based on the filename..." or "This appears to be...".
             2. No warnings about unreleased seasons or file discrepancies.
             3. No meta-commentary. 
-            4. Start directly with the plot description.`,
-            config: {
-                responseMimeType: "text/plain",
-            }
-        });
-        return response.text || "";
+            4. Start directly with the plot description.`;
+
+        return await queryAI(prompt, config);
     } catch (error) {
         console.error("Context generation error:", error);
         return "";
@@ -96,13 +233,19 @@ export const generateContext = async (filename: string, useSimulation: boolean =
 /**
  * Generates a "Show Bible" / Glossary of characters and pronoun mappings.
  */
-export const generateShowBible = async (filename: string, targetLanguage: string, useSimulation: boolean = false): Promise<string> => {
-    if (useSimulation) {
+export const generateShowBible = async (filename: string, targetLanguage: string, useSimulation: boolean = false, providerConfig?: ModelConfig): Promise<string> => {
+    const config = providerConfig || { 
+        provider: 'gemini', 
+        modelName: 'gemini-3-flash-preview', 
+        temperature: 0.3, topP: 0.95, topK: 40, maxOutputTokens: 2048,
+        useSimulation 
+    };
+
+    if (config.useSimulation) {
         await new Promise(r => setTimeout(r, 1500));
         return "SIMULATION GLOSSARY:\nJohn Doe - Protagonist | Pronouns: Anh/Em\nJane Doe - Sister | Pronouns: Chị/Em\nVillain - Antagonist | Pronouns: Hắn/Tao";
     }
 
-    const ai = getClient();
     try {
         const prompt = `You are a Localization Expert constructing a "Show Bible" for the video file: "${filename}".
         Target Language: ${targetLanguage}.
@@ -121,14 +264,7 @@ export const generateShowBible = async (filename: string, targetLanguage: string
         
         Keep it concise. Maximum 10 key characters.`;
 
-        const response = await generateContentWithRetry(ai, {
-            model: 'gemini-3-flash-preview',
-            contents: prompt,
-            config: {
-                responseMimeType: "text/plain",
-            }
-        });
-        return response.text || "";
+        return await queryAI(prompt, config);
     } catch (error) {
         console.error("Bible generation error:", error);
         return "";
@@ -138,13 +274,19 @@ export const generateShowBible = async (filename: string, targetLanguage: string
 /**
  * Checks the source language. Returns object with isEnglish flag and detected language name.
  */
-export const detectLanguage = async (lines: SubtitleLine[], useSimulation: boolean = false): Promise<{ isEnglish: boolean; language: string }> => {
-    if (useSimulation) {
+export const detectLanguage = async (lines: SubtitleLine[], useSimulation: boolean = false, providerConfig?: ModelConfig): Promise<{ isEnglish: boolean; language: string }> => {
+    const config = providerConfig || { 
+        provider: 'gemini', 
+        modelName: 'gemini-3-flash-preview', 
+        temperature: 0.3, topP: 0.95, topK: 40, maxOutputTokens: 1024,
+        useSimulation 
+    };
+
+    if (config.useSimulation) {
         await new Promise(r => setTimeout(r, 600));
         return { isEnglish: true, language: 'English (Simulated)' };
     }
 
-    const ai = getClient();
     const sample = lines
         .filter(l => l.originalText.length > 5) 
         .slice(0, 20)
@@ -154,22 +296,17 @@ export const detectLanguage = async (lines: SubtitleLine[], useSimulation: boole
     if (!sample) return { isEnglish: true, language: 'English' }; 
 
     try {
-        const response = await generateContentWithRetry(ai, {
-            model: 'gemini-3-flash-preview',
-            contents: `Analyze the following text sample from a subtitle file. 
+        const prompt = `Analyze the following text sample from a subtitle file. 
             Identify the primary language.
             
             Respond with ONLY the language name (e.g. "English", "Vietnamese", "Spanish").
             
             TEXT SAMPLE:
-            ${sample}`,
-            config: {
-                responseMimeType: "text/plain",
-            }
-        });
+            ${sample}`;
         
-        let text = response.text?.trim() || "English";
-        const languageName = text.replace(/[.]/g, '').trim();
+        const text = await queryAI(prompt, config);
+        
+        const languageName = text.trim().replace(/[.]/g, '').trim();
         const isEnglish = languageName.toLowerCase().includes("english");
         return { isEnglish, language: languageName };
     } catch (error) {
@@ -178,50 +315,16 @@ export const detectLanguage = async (lines: SubtitleLine[], useSimulation: boole
     }
 };
 
-const getLanguageInstruction = (targetLanguage: string, context: string, showBible: string, isRetry: boolean = false): string => {
-    const baseContext = context ? `PLOT CONTEXT: ${context}.` : '';
-    const bibleContext = showBible ? `\nCHARACTER BIBLE / GLOSSARY:\n${showBible}` : '';
-    
-    let instruction = `${baseContext}${bibleContext}\n`;
-
-    if (targetLanguage === 'Vietnamese') {
-        const pronounRule = showBible
-            ? `PRONOUN RULE: STRICTLY follow the "Character Bible" above for pronouns (Anh/Chi/Em/Con/Bac). If the speaker is unidentified, default to neutral (Tôi/Bạn).`
-            : `PRONOUN RULE: Default to neutral/polite pronouns (Tôi/Bạn) unless relationships are obvious in text.`;
-        instruction += pronounRule;
-    } else {
-        instruction += `Translate naturally and conversationally.`;
-    }
-
-    instruction += `\n
-    STRICT FORMATTING RULES:
-    1. MAX LENGTH: Each line must be MAX 42 characters.
-    2. LINE COUNT: Max 2 lines per subtitle.
-    3. TIMING AWARENESS: You are provided with the duration of each line in milliseconds. 
-       - If duration < 1500ms, the translation MUST be very concise (2-4 words max).
-       - Do NOT fill space with fluff just because duration is long.
-       - Ensure the viewer has enough time to read the text.
-    4. LINGUISTIC BREAKS: Never split a noun from its article, or a preposition from its noun.
-    5. DIALOGUE: If the subtitle contains dialogue for two people (starts with "- "), keep each person's speech on its own line.
-    6. LINE BREAK TOKEN: Use the token "[br]" to indicate a line break within the subtitle.
-    `;
-
-    if (isRetry) {
-        instruction += `\n\nCRITICAL RETRY INSTRUCTION: The previous translations were TOO LONG. You MUST condense the meaning.
-        - Sacrifice minor details for brevity.
-        - Use shorter synonyms.
-        - STRICTLY enforce the 42 character limit.`;
-    }
-
-    return instruction;
-};
-
+/**
+ * Main Translation Function
+ */
 export const translateBatch = async (
   lines: SubtitleLine[], 
   targetLanguage: string = "Vietnamese",
   context: string = "",
   previousLines: SubtitleLine[] = [],
   modelConfig: ModelConfig = { 
+      provider: 'gemini',
       modelName: 'gemini-3-flash-preview', 
       temperature: 0.3, 
       topP: 0.95, 
@@ -234,118 +337,105 @@ export const translateBatch = async (
   onLog?: (message: string, type: 'info' | 'request' | 'response' | 'error', data?: any) => void
 ): Promise<Map<number, string>> => {
 
-  // --- SIMULATION MODE ---
-  if (modelConfig.useSimulation) {
-      if (onLog) onLog(`[SIMULATION] Processing batch of ${lines.length} lines.`, 'info');
-      // Simulate network delay
-      await new Promise(r => setTimeout(r, 2000));
-      
-      const results = new Map<number, string>();
-      lines.forEach(line => {
-          results.set(line.id, `[${targetLanguage}] ${line.originalText}`);
-      });
-      
-      if (onLog) onLog(`[SIMULATION] Completed batch.`, 'response', "Returned mock translations");
-      return results;
-  }
-  
-  // --- REAL API CALL ---
   const performTranslation = async (linesToProcess: SubtitleLine[], isRetry: boolean): Promise<Map<number, string>> => {
-      const ai = getClient();
       
-      const previousBlock = previousLines.length > 0 && !isRetry 
-        ? `PREVIOUS LINES (Context only - DO NOT TRANSLATE):\n${previousLines.map(l => `${l.id} ||| ${l.originalText}`).join('\n')}\n\n` 
+      // 1. Build Payload (JSON)
+      const chunkPayload: Record<string, string> = {};
+      linesToProcess.forEach(l => {
+          chunkPayload[`id_${l.id}`] = l.originalText;
+      });
+      const payloadJson = JSON.stringify(chunkPayload, null, 2);
+
+      // 2. Build System Instruction (Identity + Global Context)
+      let systemInstruction = `You are an expert subtitle translator.
+Target Language: ${targetLanguage}.
+
+GOAL: Translate the dialogue naturally, preserving the flow, tone, and character voices.
+${context ? `\nSTORY CONTEXT:\n${context}` : ''}
+${showBible ? `\nCHARACTER GLOSSARY:\n${showBible}` : ''}
+
+RULES:
+1. You will receive a JSON object mapping IDs to Source Text.
+2. You must output a JSON object with the exact same keys, mapping IDs to Translated Text.
+3. Do NOT translate the keys (e.g. "id_10").
+4. Keep the output valid JSON.
+5. Translate naturally and conversationally.
+6. Use the token "[br]" to indicate a line break within the subtitle.
+7. Max 42 characters per line (approx).`;
+
+      if (targetLanguage === 'Vietnamese') {
+          systemInstruction += `\n8. PRONOUNS: Use strict Vietnamese pronouns (Anh/Em/Con/Bác/Hắn/Tao) based on the Character Bible. Avoid neutral "Bạn/Tôi" unless generic.`;
+      }
+
+      // 3. Build User Prompt (Task + Immediate Context + Payload)
+      const previousContextText = previousLines.length > 0 
+        ? `IMMEDIATE CONTEXT (Preceding lines):\n${previousLines.map(l => `- ${l.translatedText || l.originalText}`).join('\n')}\n`
         : '';
 
-      const inputBlock = linesToProcess.map(l => {
-          const dur = durations.get(l.id) || 2000;
-          return `ID: ${l.id} | Dur: ${dur}ms | Text: ${l.originalText}`;
-      }).join('\n');
-      
-      const contextInstruction = getLanguageInstruction(targetLanguage, context, showBible, isRetry);
+      const userPrompt = `TASK: JSON-to-JSON Translation
 
-      const prompt = `You are a professional subtitle translator and formatter. Translate from English to ${targetLanguage}.
+${previousContextText}
+INPUT JSON:
+${payloadJson}
 
-${contextInstruction}
+RESPONSE (JSON ONLY):`;
 
-Rules:
-1. Input format: "ID: <id> | Dur: <ms> | Text: <text>". 
-2. Output format: "<id> ||| <Translated Text>".
-3. Keep the ID and " ||| " separator EXACTLY as is.
-4. PRESERVE formatting tags (like <i>, <b>, <font>) exactly as they appear.
-5. Insert "[br]" where a line break is necessary to meet the 42-char/2-line limit.
-
-${!isRetry ? 'The "PREVIOUS LINES" section is provided for context continuity only.' : ''}
-
-${previousBlock}LINES TO TRANSLATE:
-${inputBlock}`;
-
-      if (onLog) onLog(`Sending Batch Request (${linesToProcess.length} lines, retry=${isRetry})`, 'request', prompt);
+      if (onLog) onLog(`Sending Batch Request (${linesToProcess.length} lines)`, 'request', userPrompt);
 
       try {
-        const response = await generateContentWithRetry(ai, {
-            model: modelConfig.modelName, 
-            contents: prompt,
-            config: { 
-                responseMimeType: "text/plain",
-                temperature: modelConfig.temperature,
-                topP: modelConfig.topP,
-                topK: modelConfig.topK,
-                maxOutputTokens: modelConfig.maxOutputTokens
-            }
-        });
+        const text = await queryAI(userPrompt, modelConfig, systemInstruction);
 
-        const text = response.text || "";
         if (onLog) onLog(`Received Response`, 'response', text);
 
+        // 4. Parse Response
+        const responseJson = parseJSONResponse(text);
         const resultMap = new Map<number, string>();
-        const outputLines = text.split('\n');
 
-        outputLines.forEach(line => {
-            const separatorIndex = line.indexOf('|||');
-            if (separatorIndex !== -1) {
-                const idPart = line.substring(0, separatorIndex).trim();
-                const textPart = line.substring(separatorIndex + 3).trim();
-                const id = parseInt(idPart);
-                if (!isNaN(id) && textPart && linesToProcess.some(l => l.id === id)) {
-                    resultMap.set(id, textPart);
+        // 5. Map back to IDs
+        Object.keys(responseJson).forEach(key => {
+            const idMatch = key.match(/id_(\d+)/);
+            if (idMatch) {
+                const id = parseInt(idMatch[1]);
+                if (!isNaN(id) && linesToProcess.some(l => l.id === id)) {
+                    resultMap.set(id, responseJson[key]);
                 }
             }
         });
+
         return resultMap;
 
       } catch (error: any) {
         if (onLog) onLog(`Batch Failed`, 'error', error.message || error);
         console.error("Translation error:", error);
-        throw error; // Propagate error for retry logic in App.tsx
+        throw error; 
       }
   };
 
   // 1. Initial Translation
   const initialResults = await performTranslation(lines, false);
   
-  // 2. Length Check & Retry Logic
+  // 2. Length Check & Retry Logic (Simplified for JSON flow)
   const linesToRetry: SubtitleLine[] = [];
   const finalResults = new Map<number, string>(initialResults);
 
   initialResults.forEach((translatedText, id) => {
+      // Check for length or missing translation
       const len = translatedText.replace('[br]', '').length;
-      if (len > 90) {
+      if (len > 100 || !translatedText) { 
           const originalLine = lines.find(l => l.id === id);
           if (originalLine) linesToRetry.push(originalLine);
       }
   });
 
   if (linesToRetry.length > 0) {
-      if (onLog) onLog(`Length Check Failed for ${linesToRetry.length} lines. Retrying...`, 'info');
+      if (onLog) onLog(`Length/Quality Check Failed for ${linesToRetry.length} lines. Retrying...`, 'info');
       try {
         const retryResults = await performTranslation(linesToRetry, true);
         retryResults.forEach((val, key) => {
             finalResults.set(key, val);
         });
       } catch (e) {
-          if (onLog) onLog(`Retry Failed. Keeping original long translations.`, 'error');
-          console.warn("Length check retry failed, keeping original", e);
+          if (onLog) onLog(`Retry Failed. Keeping original.`, 'error');
       }
   }
 

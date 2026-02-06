@@ -95,10 +95,12 @@ export interface AssStyleConfig {
 }
 
 export interface ModelConfig {
-    modelName: string;
+    provider: 'gemini' | 'local'; // Provider switch
+    modelName: string; // Used for Gemini model ID or Local model ID
     temperature: number;
     topP: number;
     topK: number;
     maxOutputTokens: number;
-    useSimulation?: boolean; // New Flag for Mock Mode
+    useSimulation?: boolean; 
+    localEndpoint?: string; // URL for local provider
 }
