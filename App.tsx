@@ -389,7 +389,6 @@ function App() {
   };
 
   const translateSingleFile = async (itemId: string) => {
-      // (Implementation same as previous, omitted for brevity but logic calls translateBatch and updates state)
       const itemIndex = batchItems.findIndex(i => i.id === itemId);
       if (itemIndex === -1) return;
       const item = batchItems[itemIndex];
@@ -830,10 +829,10 @@ function App() {
                                                     </div>
                                                 </div>
                                                 <div>
-                                                    <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Line Spacing</label>
+                                                    <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Subtitle Lines</label>
                                                     <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                                        <button onClick={() => setStyleConfig({...styleConfig, linesPerSubtitle: 2})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${styleConfig.linesPerSubtitle === 2 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Standard</button>
-                                                        <button onClick={() => setStyleConfig({...styleConfig, linesPerSubtitle: 1})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${styleConfig.linesPerSubtitle === 1 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Tight</button>
+                                                        <button onClick={() => setStyleConfig({...styleConfig, linesPerSubtitle: 2})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${(styleConfig.linesPerSubtitle ?? 2) === 2 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Multi-line</button>
+                                                        <button onClick={() => setStyleConfig({...styleConfig, linesPerSubtitle: 1})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${styleConfig.linesPerSubtitle === 1 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Single Line</button>
                                                     </div>
                                                 </div>
                                             </div>

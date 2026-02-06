@@ -548,7 +548,7 @@ export const STYLE_PRESETS: { [key: string]: AssStyleConfig } = {
     DEFAULT: {
         outputFormat: 'ass',
         layout: 'stacked',
-        stackOrder: 'secondary-top',
+        stackOrder: 'primary-top',
         primary: { color: '#ffffff', fontSize: 60 },
         secondary: { color: '#ffff00', fontSize: 60 },
         outlineWidth: 3,
