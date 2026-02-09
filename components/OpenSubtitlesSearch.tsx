@@ -13,7 +13,7 @@ type Provider = 'OpenSubtitles' | 'Subdl' | 'External';
 const EXTERNAL_PROVIDERS = [
     {
         name: 'OpenSubtitles.org',
-        url: (q: string) => `https://www.opensubtitles.org/en/search/sublanguageid-eng/q-${encodeURIComponent(q)}`,
+        url: (q: string) => `https://www.opensubtitles.org/en/search2/moviename-${encodeURIComponent(q)}/sublanguageid-eng`,
         desc: 'The classic website database'
     },
     {
@@ -153,18 +153,37 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
       if (season) url.searchParams.append('season_number', season);
       if (episode) url.searchParams.append('episode_number', episode);
 
+      // Attempt to include Content-Type even for GET, and ensure Api-Key is set correctly
       const response = await fetch(url.toString(), {
         method: 'GET',
-        headers: { 'Api-Key': key, 'Accept': 'application/json' }
+        headers: { 
+            'Api-Key': key, 
+            'Accept': 'application/json',
+            'Content-Type': 'application/json' 
+        }
       });
 
       if (!response.ok) {
-        let errorMsg = `Error ${response.status}: ${response.statusText}`;
+        let errorMsg = `Error ${response.status}: ${response.statusText || 'Unknown Error'}`;
         try {
-            const data = await response.json();
-            if (data.message) errorMsg = data.message;
+            // Try to parse text first to capture HTML or raw errors
+            const rawText = await response.text();
+            try {
+                 const data = JSON.parse(rawText);
+                 if (data.message) errorMsg = data.message;
+                 else if (data.errors) errorMsg = JSON.stringify(data.errors);
+            } catch {
+                // If JSON parse fails, check if raw text is short enough to be a message
+                if (rawText && rawText.length < 200) errorMsg = rawText;
+            }
         } catch {}
-        if (response.status === 403) errorMsg += ". Ensure you are using a Consumer Key from opensubtitles.com.";
+        
+        if (response.status === 403) {
+             errorMsg = "Access Denied (403). Your API Key is likely invalid or quota exceeded. Please double-check you copied the 'Consumer Key' correctly from the OpenSubtitles.com dashboard.";
+        }
+        if (response.status === 401) {
+             errorMsg = "Unauthorized (401). Invalid API Key.";
+        }
         throw new Error(errorMsg);
       }
 
@@ -185,6 +204,8 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
               fileName: item.attributes.files[0]?.file_name || 'subtitle.srt'
           }));
           setResults(unified);
+      } else {
+          setResults([]);
       }
   };
 
@@ -192,7 +213,7 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
       // Subdl API Endpoint
       const url = new URL('https://api.subdl.com/api/v1/subtitles');
       url.searchParams.append('api_key', key);
-      url.searchParams.append('languages', 'EN'); // Subdl uses 2-letter codes usually
+      url.searchParams.append('languages', 'en'); // Changed 'EN' to 'en'
 
       if (searchMode === 'imdb') {
            url.searchParams.append('imdb_id', query.toLowerCase().startsWith('tt') ? query.trim() : `tt${query.trim()}`);
@@ -200,6 +221,10 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
            url.searchParams.append('tmdb_id', query.trim());
       } else {
            url.searchParams.append('film_name', query.trim());
+      }
+      
+      if (season && episode) {
+          url.searchParams.append('type', 'tv');
       }
 
       const response = await fetch(url.toString());
@@ -216,30 +241,40 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
       // Flatten results
       const unified: UnifiedSubtitle[] = [];
       
+      // Helper to process a subtitle object
+      const processSubtitle = (sub: any, movieName: string) => {
+          if (season && sub.season && parseInt(sub.season) !== parseInt(season)) return;
+          if (episode && sub.episode && parseInt(sub.episode) !== parseInt(episode)) return;
+
+          unified.push({
+              id: sub.url, // Using URL as ID for Subdl
+              provider: 'Subdl',
+              title: sub.release_name || movieName,
+              language: sub.language,
+              format: 'zip',
+              downloadCount: sub.downloads,
+              score: sub.rating,
+              uploadDate: sub.date,
+              hearingImpaired: sub.hearing_impaired,
+              downloadUrl: sub.url,
+              fileName: sub.release_name ? `${sub.release_name}.srt` : 'subtitle.srt'
+          });
+      };
+
+      // Scenario 1: 'results' contains movies, which contain 'subtitles'
       if (data.results && Array.isArray(data.results)) {
           data.results.forEach((movie: any) => {
               if (movie.subtitles && Array.isArray(movie.subtitles)) {
-                  movie.subtitles.forEach((sub: any) => {
-                      if (season && sub.season && parseInt(sub.season) !== parseInt(season)) return;
-                      if (episode && sub.episode && parseInt(sub.episode) !== parseInt(episode)) return;
-
-                      unified.push({
-                          id: sub.url, // Using URL as ID for Subdl
-                          provider: 'Subdl',
-                          title: sub.release_name || movie.name,
-                          language: sub.language,
-                          format: 'zip',
-                          downloadCount: sub.downloads,
-                          score: sub.rating,
-                          uploadDate: sub.date,
-                          hearingImpaired: sub.hearing_impaired,
-                          downloadUrl: sub.url,
-                          fileName: sub.release_name ? `${sub.release_name}.srt` : 'subtitle.srt'
-                      });
-                  });
+                  movie.subtitles.forEach((sub: any) => processSubtitle(sub, movie.name));
               }
           });
       }
+      
+      // Scenario 2: 'subtitles' is at the root (sometimes returned by ID searches)
+      if (data.subtitles && Array.isArray(data.subtitles)) {
+          data.subtitles.forEach((sub: any) => processSubtitle(sub, query));
+      }
+
       setResults(unified);
   };
 
@@ -274,7 +309,15 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
           body: JSON.stringify({ file_id: fileId })
       });
 
-      if (!linkRes.ok) throw new Error("Failed to get download link from OpenSubtitles");
+      if (!linkRes.ok) {
+           let msg = "Failed to get download link";
+           try {
+               const errJson = await linkRes.json();
+               if(errJson.message) msg = errJson.message;
+           } catch {}
+           throw new Error(msg);
+      }
+      
       const linkData = await linkRes.json();
       const downloadUrl = linkData.link;
 
