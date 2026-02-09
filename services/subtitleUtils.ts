@@ -21,6 +21,16 @@ const ANY_TAG = /<[^>]+>/g;
 const stripTags = (html: string) => html.replace(TAG_REGEX, '');
 
 /**
+ * Normalize various line break formats to internal [br] token.
+ */
+const normalizeBreaks = (text: string): string => {
+    if (!text) return "";
+    return text
+        .replace(/<br\s*\/?>/gi, '[br]')
+        .replace(/<\/br>/gi, '[br]');
+};
+
+/**
  * Converts SRT HTML-like tags to ASS override tags.
  */
 const srtToAss = (text: string): string => {
@@ -34,7 +44,7 @@ const srtToAss = (text: string): string => {
 /**
  * Parses SRT timestamp "00:00:00,000" to milliseconds.
  */
-const parseTimeMs = (timeString: string): number => {
+export const parseTimeMs = (timeString: string): number => {
     if (!timeString) return 0;
     const parts = timeString.replace('.', ',').split(',');
     if (parts.length !== 2) return 0;
@@ -46,7 +56,7 @@ const parseTimeMs = (timeString: string): number => {
 /**
  * Formats milliseconds back to SRT timestamp "00:00:00,000".
  */
-const formatSRTTime = (totalMs: number): string => {
+export const formatSRTTime = (totalMs: number): string => {
     const ms = Math.floor(totalMs % 1000);
     const totalSeconds = Math.floor(totalMs / 1000);
     const s = totalSeconds % 60;
@@ -102,7 +112,7 @@ export const calculateSafeDurations = (subtitles: SubtitleLine[]): Map<number, n
  * Optimizes subtitle timings to ensure NO OVERLAP and readable duration.
  * STRICT MODE: Never changes Start Time.
  */
-const optimizeTimings = (subtitles: SubtitleLine[], enableSmartTiming: boolean = true): SubtitleLine[] => {
+export const optimizeTimings = (subtitles: SubtitleLine[], enableSmartTiming: boolean = true): SubtitleLine[] => {
     if (!enableSmartTiming) return subtitles;
 
     return subtitles.map((sub, index) => {
@@ -170,6 +180,50 @@ const optimizeTimings = (subtitles: SubtitleLine[], enableSmartTiming: boolean =
             endTime: formatSRTTime(newEndMs)
         };
     });
+};
+
+/**
+ * Merges imported translated subtitles into source subtitles based on closest Start Time,
+ * then runs smart timing optimization.
+ */
+export const mergeAndOptimizeSubtitles = (
+    sourceSubtitles: SubtitleLine[], 
+    importedSubtitles: SubtitleLine[], 
+    enableSmartTiming: boolean
+): SubtitleLine[] => {
+    
+    // 1. Merge Process
+    const merged = sourceSubtitles.map(sourceLine => {
+        const sourceStart = parseTimeMs(sourceLine.startTime);
+        
+        // Find the closest imported line by start time
+        let bestMatch: SubtitleLine | null = null;
+        let minDiff = Infinity;
+
+        for (const importedLine of importedSubtitles) {
+            const importedStart = parseTimeMs(importedLine.startTime);
+            const diff = Math.abs(importedStart - sourceStart);
+            
+            if (diff < minDiff) {
+                minDiff = diff;
+                bestMatch = importedLine;
+            }
+            // Optimization: Since subtitles are sorted, if diff starts growing, we passed the sweet spot
+            // However, slight out-of-order in bad SRTs might break this, so simple iteration is safer for small-medium files.
+        }
+
+        // Tolerance: If the closest match is more than 2 seconds away, assume no match?
+        // Let's be generous (5s) or just take the best match if structure is similar.
+        // For now, we trust the Best Match mechanism.
+        
+        return {
+            ...sourceLine,
+            translatedText: bestMatch ? bestMatch.originalText : sourceLine.translatedText
+        };
+    });
+
+    // 2. Optimize Timings (Adjust end times based on new text length)
+    return optimizeTimings(merged, enableSmartTiming);
 };
 
 export const parseSRT = (data: string): SubtitleLine[] => {
@@ -462,10 +516,18 @@ Comment: 0,0:00:00.00,0:00:00.00,Primary,,0,0,0,,metadata: DualSub AI Generation
     const end = convertToASSTime(sub.endTime);
     
     const formatContent = (text: string) => {
-        let processed = srtToAss(text);
+        // 1. Normalize HTML breaks to [br] first so srtToAss doesn't strip them
+        let normalized = normalizeBreaks(text);
+        
+        // 2. Convert styles (b, i, u) to ASS, strip other HTML
+        let processed = srtToAss(normalized);
+        
+        // 3. Handle [br] based on config
         if (config.linesPerSubtitle === 1) {
-             return processed.replace(BR_REGEX, ' ');
+             // Single Line: replace [br] with space
+             return processed.split('[br]').join(' ');
         }
+        // Multi-line: replace [br] with \N
         return processed.split('[br]').join('\\N');
     };
 
@@ -489,8 +551,17 @@ Comment: 0,0:00:00.00,0:00:00.00,Primary,,0,0,0,,metadata: DualSub AI Generation
 const renderSRT = (optimizedSubtitles: SubtitleLine[], config: AssStyleConfig): string => {
     return optimizedSubtitles.map((sub, index) => {
         const cleanText = (t: string) => {
-            let cleaned = t.replace(/{[^}]*}/g, '');
-            return cleaned.replace(BR_REGEX, '\n');
+            // 1. Normalize explicit HTML breaks to internal [br]
+            let normalized = normalizeBreaks(t);
+
+            // 2. Remove ASS override tags if any remain
+            let cleaned = normalized.replace(/{[^}]*}/g, '');
+
+            // 3. Handle [br]
+            if (config.linesPerSubtitle === 1) {
+                return cleaned.split('[br]').join(' ');
+            }
+            return cleaned.split('[br]').join('\n');
         };
 
         const primaryText = sub.translatedText ? cleanText(sub.translatedText) : '';

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Type, Cog, X, AlignJustify, AlignLeft, Cpu, FileType, Hourglass, ChevronsRight, Eye, ArrowUp, ArrowDown, Moon, Sun, BookOpen, Edit3, Save, ScrollText, Terminal, TestTube, Globe, Server } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Type, Cog, X, AlignJustify, AlignLeft, Cpu, FileType, Hourglass, ChevronsRight, Eye, ArrowUp, ArrowDown, Moon, Sun, BookOpen, Edit3, Save, ScrollText, Terminal, TestTube, Globe, Server, FileInput } from 'lucide-react';
 import { SubtitleLine, TabView, AssStyleConfig, BatchItem, ModelConfig, LogEntry } from './types';
-import { parseSubtitle, generateSubtitleContent, downloadFile, STYLE_PRESETS, calculateSafeDurations } from './services/subtitleUtils';
+import { parseSubtitle, generateSubtitleContent, downloadFile, STYLE_PRESETS, calculateSafeDurations, mergeAndOptimizeSubtitles } from './services/subtitleUtils';
 import { translateBatch, generateContext, detectLanguage, generateShowBible, identifyShowName } from './services/geminiService';
 import { saveSession, loadSession, clearSession, loadShowMetadata, saveShowMetadata } from './services/storage';
 import SubtitleSearch from './components/OpenSubtitlesSearch';
@@ -44,11 +44,11 @@ const VisualPreview = ({
     isSample?: boolean
 }) => {
     
-    // Restored Cinematic Look
+    // Green Screen Background for Contrast Check
     const containerStyle: React.CSSProperties = {
         aspectRatio: '16/9',
-        backgroundColor: '#000000', 
-        backgroundImage: 'radial-gradient(circle at center, #1a1a1a 0%, #000000 100%)',
+        backgroundColor: '#166534', 
+        backgroundImage: 'radial-gradient(circle at center, #4ade80 0%, #14532d 100%)',
         position: 'relative',
         overflow: 'hidden',
         borderRadius: '0.75rem',
@@ -58,7 +58,8 @@ const VisualPreview = ({
         boxShadow: '0 20px 50px -12px rgba(0, 0, 0, 0.5)'
     };
 
-    const SCALE = 0.6; 
+    // Reduced scale to simulate 4K TV resolution proportions on small preview
+    const SCALE = 0.25; 
     
     const displayOriginal = original || "Original Text Placeholder";
     const displayTranslated = translated || "Translated Text Placeholder";
@@ -129,7 +130,10 @@ const VisualPreview = ({
 
     const formatHtml = (text: string) => {
         if (!text) return { __html: "&nbsp;" };
-        let content = text;
+        
+        // Normalize HTML breaks to [br] first
+        let content = text.replace(/<br\s*\/?>/gi, '[br]').replace(/<\/br>/gi, '[br]');
+        
         if (config.linesPerSubtitle === 1) {
             content = content.replace(/\[br\]/g, ' ');
         } else {
@@ -316,37 +320,173 @@ function App() {
   const applyPreset = (presetName: keyof typeof STYLE_PRESETS) => setStyleConfig(STYLE_PRESETS[presetName]);
   const resetStyles = () => setStyleConfig(STYLE_PRESETS.DEFAULT);
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
-    const newItems: BatchItem[] = Array.from(files).map((file: File) => ({
-        id: crypto.randomUUID(),
-        fileName: file.name,
-        originalFile: file,
-        subtitles: [],
-        status: 'pending',
-        progress: 0,
-        message: 'Queued',
-        logs: []
-    }));
+    // Helper to read file text
+    const readFile = (file: File): Promise<{file: File, content: string}> => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve({ file, content: e.target?.result as string || '' });
+            reader.onerror = () => resolve({ file, content: '' }); 
+            reader.readAsText(file);
+        });
+    };
 
-    setBatchItems(prev => [...prev, ...newItems]);
+    const fileList = Array.from(files);
+    const results = await Promise.all(fileList.map(readFile));
+    
+    // Parse all files first
+    const parsedFiles = results.map(({ file, content }) => {
+        try {
+            const subtitles = parseSubtitle(content, file.name);
+            const nameNoExt = file.name.replace(/\.(srt|ass|vtt|ssa)$/i, "");
+            return { file, subtitles, nameNoExt, valid: subtitles.length > 0 };
+        } catch (e) {
+            return { file, subtitles: [], nameNoExt: file.name, valid: false };
+        }
+    });
 
-    newItems.forEach(item => {
+    setBatchItems(prev => {
+        const nextBatch = [...prev];
+        const usedIndices = new Set<number>();
+
+        // 1. Try to merge new files into EXISTING batch items
+        parsedFiles.forEach((pFile, idx) => {
+            if (!pFile.valid) return;
+
+            // Find match in existing items (checks if pFile is translation of existing)
+            const matchIndex = nextBatch.findIndex(existing => {
+                 const existingNameNoExt = existing.fileName.replace(/\.(srt|ass|vtt|ssa)$/i, "");
+                 if (pFile.nameNoExt.startsWith(existingNameNoExt)) {
+                     const suffix = pFile.nameNoExt.substring(existingNameNoExt.length);
+                     // Check suffix: -xx, _xx, .xx, or (1)
+                     return /^([-_.]\w{2}|\s\(\d+\))$/.test(suffix);
+                 }
+                 return false;
+            });
+
+            if (matchIndex !== -1) {
+                const existing = nextBatch[matchIndex];
+                const merged = mergeAndOptimizeSubtitles(existing.subtitles, pFile.subtitles, smartTiming);
+                
+                nextBatch[matchIndex] = {
+                    ...existing,
+                    subtitles: merged,
+                    status: 'completed',
+                    progress: 100,
+                    message: `Merged: ${pFile.file.name}`
+                };
+                usedIndices.add(idx);
+            }
+        });
+
+        // 2. Pair remaining new files with each other
+        const remainingFiles = parsedFiles
+            .map((f, i) => ({ ...f, origIndex: i }))
+            .filter((_, i) => !usedIndices.has(i));
+
+        // Sort by name length (shortest is likely source)
+        remainingFiles.sort((a, b) => a.nameNoExt.length - b.nameNoExt.length);
+
+        const mergedInBatch = new Set<number>(); // IDs within remainingFiles array
+        const newBatchItems: BatchItem[] = [];
+
+        remainingFiles.forEach((source, i) => {
+            if (mergedInBatch.has(i)) return; 
+
+            let currentSubtitles = source.subtitles;
+            let status: BatchItem['status'] = source.valid ? 'pending' : 'error';
+            let message = source.valid ? `Ready (${source.subtitles.length} lines)` : 'Parse Error';
+            let progress = 0;
+
+            if (source.valid) {
+                // Look for translations of this source in the rest of the new files
+                remainingFiles.forEach((trans, j) => {
+                    if (i === j) return;
+                    if (mergedInBatch.has(j)) return;
+                    if (!trans.valid) return;
+
+                    if (trans.nameNoExt.startsWith(source.nameNoExt)) {
+                         const suffix = trans.nameNoExt.substring(source.nameNoExt.length);
+                         if (/^([-_.]\w{2}|\s\(\d+\))$/.test(suffix)) {
+                             // Matched translation
+                             currentSubtitles = mergeAndOptimizeSubtitles(currentSubtitles, trans.subtitles, smartTiming);
+                             status = 'completed';
+                             progress = 100;
+                             message = `Auto-merged: ${trans.file.name}`;
+                             mergedInBatch.add(j);
+                         }
+                    }
+                });
+            }
+
+            newBatchItems.push({
+                id: crypto.randomUUID(),
+                fileName: source.file.name,
+                originalFile: source.file,
+                subtitles: currentSubtitles,
+                status: status,
+                progress: progress,
+                message: message,
+                logs: []
+            });
+        });
+
+        // Auto-select first item if queue was empty
+        if (nextBatch.length === 0 && newBatchItems.length > 0) {
+            // Need to set ActiveItemId, but can't do it inside setState callback strictly cleanly
+            // But we can defer it or rely on useEffect. 
+            // Actually, we can assume the user wants to see the first new item if nothing else is there.
+        }
+
+        return [...nextBatch, ...newBatchItems];
+    });
+
+    // Handle Active Item Selection Logic after state update
+    // We can't rely on `nextBatch` here, but useEffect checks activeItemId vs batchItems
+    
+    // Clear input
+    event.target.value = '';
+  };
+
+  const handleImportTranslation = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file || !activeItemId) return;
+        
         const reader = new FileReader();
         reader.onload = (e) => {
             const content = e.target?.result as string;
             try {
-                const parsed = parseSubtitle(content, item.fileName);
-                setBatchItems(prev => prev.map(pi => pi.id === item.id ? { ...pi, subtitles: parsed, message: `Ready (${parsed.length} lines)` } : pi));
-                if (!activeItemId) setActiveItemId(item.id);
+                const importedSubtitles = parseSubtitle(content, file.name);
+                
+                setBatchItems(prev => prev.map(item => {
+                    if (item.id !== activeItemId) return item;
+                    
+                    const mergedSubtitles = mergeAndOptimizeSubtitles(
+                        item.subtitles,
+                        importedSubtitles,
+                        smartTiming
+                    );
+                    
+                    return {
+                        ...item,
+                        subtitles: mergedSubtitles,
+                        status: 'completed',
+                        progress: 100,
+                        message: 'Translation Imported & Optimized'
+                    };
+                }));
+                
             } catch (err) {
-                setBatchItems(prev => prev.map(pi => pi.id === item.id ? { ...pi, status: 'error', message: 'Parse Error' } : pi));
+                alert("Failed to parse imported translation file.");
             }
         };
-        reader.readAsText(item.originalFile!);
-    });
+        reader.readAsText(file);
+        
+        // Reset input
+        event.target.value = '';
   };
 
   const handleSubtitleSelection = (content: string, name: string) => {
@@ -703,17 +843,33 @@ function App() {
 
                             {/* Main Actions */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <button
-                                    onClick={handleTranslateAll}
-                                    disabled={isTranslating.current}
-                                    className={`group relative p-4 rounded-xl flex items-center justify-center gap-3 transition-all overflow-hidden ${
-                                        isTranslating.current 
-                                        ? 'bg-zinc-200 dark:bg-zinc-800 cursor-not-allowed text-zinc-500'
-                                        : 'bg-yellow-500 text-black font-bold hover:shadow-[0_0_30px_-10px_rgba(234,179,8,0.5)] hover:scale-[1.02]'
-                                    }`}
-                                >
-                                    {isTranslating.current ? 'Processing...' : <><RefreshCw className="w-5 h-5 transition-transform group-hover:rotate-180" /> <span>Translate</span></>}
-                                </button>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={handleTranslateAll}
+                                        disabled={isTranslating.current}
+                                        className={`flex-1 group relative p-4 rounded-xl flex items-center justify-center gap-3 transition-all overflow-hidden ${
+                                            isTranslating.current 
+                                            ? 'bg-zinc-200 dark:bg-zinc-800 cursor-not-allowed text-zinc-500'
+                                            : 'bg-yellow-500 text-black font-bold hover:shadow-[0_0_30px_-10px_rgba(234,179,8,0.5)] hover:scale-[1.02]'
+                                        }`}
+                                    >
+                                        {isTranslating.current ? 'Processing...' : <><RefreshCw className="w-5 h-5 transition-transform group-hover:rotate-180" /> <span>Translate</span></>}
+                                    </button>
+                                    
+                                    <button
+                                        className="relative p-4 rounded-xl flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-200 font-bold transition-all border border-zinc-300 dark:border-zinc-700 w-16 group"
+                                        title="Import translated file to merge"
+                                    >
+                                        <FileInput className="w-5 h-5" />
+                                        <div className="absolute bottom-full mb-2 hidden group-hover:block bg-black text-white text-xs px-2 py-1 rounded whitespace-nowrap">Merge Translation</div>
+                                        <input 
+                                            type="file" 
+                                            accept=".srt,.ass,.ssa,.vtt" 
+                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                            onChange={handleImportTranslation}
+                                        />
+                                    </button>
+                                </div>
 
                                 <div className="flex gap-2">
                                     <button
