@@ -57,8 +57,8 @@ export const parseTimeMs = (timeString: string): number => {
  * Formats milliseconds back to SRT timestamp "00:00:00,000".
  */
 export const formatSRTTime = (totalMs: number): string => {
-    const ms = Math.floor(totalMs % 1000);
-    const totalSeconds = Math.floor(totalMs / 1000);
+    const ms = Math.floor(Math.max(0, totalMs) % 1000);
+    const totalSeconds = Math.floor(Math.max(0, totalMs) / 1000);
     const s = totalSeconds % 60;
     const totalMinutes = Math.floor(totalSeconds / 60);
     const m = totalMinutes % 60;
@@ -183,8 +183,15 @@ export const optimizeTimings = (subtitles: SubtitleLine[], enableSmartTiming: bo
 };
 
 /**
- * Merges imported translated subtitles into source subtitles based on closest Start Time,
- * then runs smart timing optimization.
+ * Merges imported translated subtitles into source subtitles.
+ * 
+ * ALGORITHM:
+ * 1. 1:1 Match Check: If counts match and start/end times align closely, simple merge.
+ * 2. Linear Drift Calculation: Detect framerate mismatch (24fps vs 25fps) and calculate ratio.
+ * 3. Dynamic Time Warping (DTW): Find optimal alignment path, allowing for:
+ *    - Matches (Time is close)
+ *    - Insertions (Target has line, Source doesn't - e.g. Credits) -> Preserved
+ *    - Deletions (Source has line, Target doesn't) -> Source kept empty
  */
 export const mergeAndOptimizeSubtitles = (
     sourceSubtitles: SubtitleLine[], 
@@ -192,38 +199,153 @@ export const mergeAndOptimizeSubtitles = (
     enableSmartTiming: boolean
 ): SubtitleLine[] => {
     
-    // 1. Merge Process
-    const merged = sourceSubtitles.map(sourceLine => {
-        const sourceStart = parseTimeMs(sourceLine.startTime);
-        
-        // Find the closest imported line by start time
-        let bestMatch: SubtitleLine | null = null;
-        let minDiff = Infinity;
+    // Pre-calculate timestamps for performance
+    const sTimes = sourceSubtitles.map(s => ({ start: parseTimeMs(s.startTime), end: parseTimeMs(s.endTime) }));
+    const iTimes = importedSubtitles.map(s => ({ start: parseTimeMs(s.startTime), end: parseTimeMs(s.endTime) }));
 
-        for (const importedLine of importedSubtitles) {
-            const importedStart = parseTimeMs(importedLine.startTime);
-            const diff = Math.abs(importedStart - sourceStart);
-            
-            if (diff < minDiff) {
-                minDiff = diff;
-                bestMatch = importedLine;
-            }
-            // Optimization: Since subtitles are sorted, if diff starts growing, we passed the sweet spot
-            // However, slight out-of-order in bad SRTs might break this, so simple iteration is safer for small-medium files.
+    // --- STEP 1: 1:1 EXACT MATCH HEURISTIC ---
+    // If files are identical in structure, avoid expensive processing.
+    const isExact = () => {
+        if (sourceSubtitles.length !== importedSubtitles.length) return false;
+        if (sourceSubtitles.length === 0) return true;
+        
+        // Check start, middle, and end for alignment
+        const indices = [0, Math.floor(sourceSubtitles.length/2), sourceSubtitles.length-1];
+        for (const i of indices) {
+             if (Math.abs(sTimes[i].start - iTimes[i].start) > 500) return false;
         }
+        return true;
+    };
 
-        // Tolerance: If the closest match is more than 2 seconds away, assume no match?
-        // Let's be generous (5s) or just take the best match if structure is similar.
-        // For now, we trust the Best Match mechanism.
+    if (isExact()) {
+        const merged = sourceSubtitles.map((src, i) => ({
+            ...src,
+            translatedText: importedSubtitles[i].originalText // Note: imported 'originalText' is the translation content here
+        }));
+        return optimizeTimings(merged, enableSmartTiming);
+    }
+
+    // --- STEP 2: LINEAR DRIFT CORRECTION ---
+    let ratio = 1.0;
+    let offset = 0;
+    
+    // Only calculate drift if we have enough data points
+    if (sTimes.length > 10 && iTimes.length > 10) {
+        // Use 10% - 90% range to avoid intro/outro credit anomalies
+        const startIdx = Math.floor(sTimes.length * 0.1);
+        const endIdx = Math.floor(sTimes.length * 0.9);
         
-        return {
-            ...sourceLine,
-            translatedText: bestMatch ? bestMatch.originalText : sourceLine.translatedText
-        };
-    });
+        const iStartIdx = Math.floor(iTimes.length * 0.1);
+        const iEndIdx = Math.floor(iTimes.length * 0.9);
 
-    // 2. Optimize Timings (Adjust end times based on new text length)
-    return optimizeTimings(merged, enableSmartTiming);
+        const sDur = sTimes[endIdx].start - sTimes[startIdx].start;
+        const iDur = iTimes[iEndIdx].start - iTimes[iStartIdx].start;
+
+        // If significant duration difference (>1%), apply correction
+        if (iDur > 0 && sDur > 0) {
+            const rawRatio = sDur / iDur;
+            if (Math.abs(1 - rawRatio) > 0.01) {
+                ratio = rawRatio;
+            }
+        }
+        
+        // Calculate offset based on the start anchor adjusted by ratio
+        offset = sTimes[startIdx].start - (iTimes[iStartIdx].start * ratio);
+    }
+    
+    const getAdjustedImportStart = (idx: number) => (iTimes[idx].start * ratio) + offset;
+
+    // --- STEP 3: DYNAMIC TIME WARPING (DTW) ---
+    const n = sourceSubtitles.length;
+    const m = importedSubtitles.length;
+    
+    // Costs
+    const SKIP_SOURCE_COST = 5000; // Expensive to skip source (we want to fill them)
+    const SKIP_IMPORT_COST = 500;  // Cheap to skip import (allows inserting credits easily)
+    
+    // DP Arrays (Using TypedArrays for memory efficiency on large files)
+    const dp = new Float32Array((n + 1) * (m + 1));
+    const ptr = new Int8Array((n + 1) * (m + 1)); // 0: Match, 1: Skip Import (Insert), 2: Skip Source (Delete)
+    
+    const idx = (r: number, c: number) => r * (m + 1) + c;
+
+    // Initialization
+    dp[0] = 0;
+    for (let i = 1; i <= n; i++) { dp[idx(i, 0)] = i * SKIP_SOURCE_COST; ptr[idx(i, 0)] = 2; }
+    for (let j = 1; j <= m; j++) { dp[idx(0, j)] = j * SKIP_IMPORT_COST; ptr[idx(0, j)] = 1; }
+
+    // Fill Matrix
+    for (let i = 1; i <= n; i++) {
+        for (let j = 1; j <= m; j++) {
+            const sTime = sTimes[i-1].start;
+            const iTimeAdjusted = getAdjustedImportStart(j-1);
+            
+            const matchCost = Math.abs(sTime - iTimeAdjusted);
+            
+            const costMatch = dp[idx(i-1, j-1)] + matchCost;
+            const costSkipSource = dp[idx(i-1, j)] + SKIP_SOURCE_COST;
+            const costSkipImport = dp[idx(i, j-1)] + SKIP_IMPORT_COST;
+
+            if (costMatch <= costSkipSource && costMatch <= costSkipImport) {
+                dp[idx(i, j)] = costMatch;
+                ptr[idx(i, j)] = 0;
+            } else if (costSkipImport <= costSkipSource) {
+                dp[idx(i, j)] = costSkipImport;
+                ptr[idx(i, j)] = 1;
+            } else {
+                dp[idx(i, j)] = costSkipSource;
+                ptr[idx(i, j)] = 2;
+            }
+        }
+    }
+
+    // Traceback to build result
+    const result: SubtitleLine[] = [];
+    let i = n;
+    let j = m;
+
+    while (i > 0 || j > 0) {
+        const p = ptr[idx(i, j)];
+        
+        if (i > 0 && j > 0 && p === 0) {
+            // MATCH: Use Source time, add Translation
+            result.push({
+                ...sourceSubtitles[i-1],
+                translatedText: importedSubtitles[j-1].originalText
+            });
+            i--; j--;
+        } else if (j > 0 && (i === 0 || p === 1)) {
+            // INSERTION: Import has line, Source doesn't.
+            // This preserves credits/extra lines from the translation file.
+            // We MUST map the time to the Source timeline using ratio/offset.
+            const imp = importedSubtitles[j-1];
+            const newStart = (iTimes[j-1].start * ratio) + offset;
+            const newEnd = (iTimes[j-1].end * ratio) + offset;
+            
+            result.push({
+                id: -1, // Temp ID, fixed later
+                startTime: formatSRTTime(newStart),
+                endTime: formatSRTTime(newEnd),
+                originalText: "", // No English source
+                translatedText: imp.originalText
+            });
+            j--;
+        } else if (i > 0 && (j === 0 || p === 2)) {
+            // DELETION: Source has line, Import doesn't.
+            // Keep source line empty.
+            result.push({
+                ...sourceSubtitles[i-1],
+                translatedText: ""
+            });
+            i--;
+        }
+    }
+
+    // Traceback builds backwards
+    result.reverse();
+    
+    // Re-index IDs and Optimize
+    return optimizeTimings(result.map((r, index) => ({...r, id: index + 1})), enableSmartTiming);
 };
 
 export const parseSRT = (data: string): SubtitleLine[] => {
