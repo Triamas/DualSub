@@ -10,6 +10,11 @@ DualSub AI is a professional-grade web application for creating dual-language su
 - **Context-Aware**: Automatically identifies shows/movies to generate a **"Show Bible"** (character glossary) and plot context, ensuring consistent character voices and correct pronoun usage (specialized for Vietnamese).
 - **Batch Processing**: Concurrent processing pipeline handles large files efficiently with auto-retry logic for quality assurance.
 
+### 🔄 Merge Existing Subtitles
+- **Auto-Merge**: Drag & drop a source subtitle (e.g., `Movie.srt`) together with a translated subtitle (e.g., `Movie.vi.srt`). The app automatically pairs them and fixes synchronization issues.
+- **Manual Import**: Use the **"Merge Translation"** button on any active file to import a secondary subtitle track (e.g., from a downloaded file).
+- **Sync Protection**: Applies **Dynamic Time Warping (DTW)** and **Linear Drift Correction** to external translations, allowing you to combine subtitles from different releases (e.g., Web-DL vs. BluRay) seamlessly.
+
 ### ⏱️ Smart Synchronization
 - **Linear Drift Correction**: Automatically detects and fixes framerate mismatches (e.g., syncing a 23.976fps source with a 25fps translation).
 - **Dynamic Time Warping (DTW)**: Uses advanced sequence alignment algorithms to handle deleted scenes, extra credits, or non-linear timing mismatches without manual intervention.
