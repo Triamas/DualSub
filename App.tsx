@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Type, Cog, X, AlignJustify, AlignLeft, Cpu, FileType, Hourglass, ChevronsRight, Eye, ArrowUp, ArrowDown, Moon, Sun, BookOpen, Edit3, Save, ScrollText, Terminal, TestTube, Globe, Server, FileInput } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Type, Cog, X, AlignJustify, AlignLeft, Cpu, FileType, Hourglass, ChevronsRight, Eye, ArrowUp, ArrowDown, Moon, Sun, BookOpen, Edit3, Save, ScrollText, Terminal, TestTube, Globe, Server, FileInput, CloudCog } from 'lucide-react';
 import { SubtitleLine, TabView, AssStyleConfig, BatchItem, ModelConfig, LogEntry } from './types';
 import { parseSubtitle, generateSubtitleContent, downloadFile, STYLE_PRESETS, calculateSafeDurations, mergeAndOptimizeSubtitles } from './services/subtitleUtils';
 import { translateBatch, generateContext, detectLanguage, generateShowBible, identifyShowName } from './services/geminiService';
@@ -220,7 +220,8 @@ function App() {
       topK: 40,
       maxOutputTokens: 8192,
       useSimulation: false,
-      localEndpoint: 'http://127.0.0.1:8080/v1/chat/completions'
+      localEndpoint: 'http://127.0.0.1:8080/v1/chat/completions',
+      apiKey: ''
   });
   const [showModelSettings, setShowModelSettings] = useState(false);
 
@@ -701,6 +702,27 @@ function App() {
   const completedCount = batchItems.filter(i => i.status === 'completed').length;
   const getDownloadLabel = () => completedCount === 1 ? `Download` : `Download All (${completedCount})`;
   
+  // Set default configurations when switching providers
+  const handleProviderChange = (provider: ModelConfig['provider']) => {
+      const newConfig = { ...modelConfig, provider };
+      if (provider === 'gemini') {
+          newConfig.modelName = 'gemini-3-flash-preview';
+          newConfig.apiKey = ''; // Reset custom key, use env
+      } else if (provider === 'deepseek') {
+          newConfig.modelName = 'deepseek-chat';
+          newConfig.localEndpoint = 'https://api.deepseek.com/chat/completions';
+      } else if (provider === 'local') {
+          newConfig.modelName = 'llama3';
+          newConfig.localEndpoint = 'http://127.0.0.1:8080/v1/chat/completions';
+          newConfig.apiKey = '';
+      } else {
+          // Generic OpenAI
+          newConfig.modelName = 'gpt-4o';
+          newConfig.localEndpoint = 'https://api.openai.com/v1/chat/completions';
+      }
+      setModelConfig(newConfig);
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col font-sans transition-colors duration-300">
       {/* Header */}
@@ -1090,47 +1112,98 @@ function App() {
             {/* Model Settings Modal */}
             {showModelSettings && (
                  <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in">
-                    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-xl max-w-md w-full shadow-2xl space-y-6">
+                    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-xl max-w-lg w-full shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
                         <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
                             <h3 className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2"><Cpu className="w-5 h-5 text-yellow-500"/> Model Configuration</h3>
                             <button onClick={() => setShowModelSettings(false)}><X className="w-5 h-5 text-zinc-500" /></button>
                         </div>
                         
                         <div className="space-y-4">
-                             <div className="flex p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
-                                 <button onClick={() => setModelConfig({...modelConfig, provider: 'gemini'})} className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${modelConfig.provider === 'gemini' ? 'bg-white dark:bg-zinc-700 shadow-sm text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400'}`}>Gemini (Cloud)</button>
-                                 <button onClick={() => setModelConfig({...modelConfig, provider: 'local'})} className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${modelConfig.provider === 'local' ? 'bg-white dark:bg-zinc-700 shadow-sm text-zinc-900 dark:text-white' : 'text-zinc-500 dark:text-zinc-400'}`}>Local LLM</button>
+                             {/* Provider Selector */}
+                             <div>
+                                 <label className="text-xs font-semibold uppercase text-zinc-500 mb-2 block">AI Provider</label>
+                                 <div className="grid grid-cols-2 gap-2">
+                                     <button onClick={() => handleProviderChange('gemini')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'gemini' ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>Gemini (Google)</button>
+                                     <button onClick={() => handleProviderChange('deepseek')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'deepseek' ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>DeepSeek</button>
+                                     <button onClick={() => handleProviderChange('local')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'local' ? 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>Local (Ollama)</button>
+                                     <button onClick={() => handleProviderChange('openai')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'openai' ? 'bg-teal-50 dark:bg-teal-900/30 border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>OpenAI / Other</button>
+                                 </div>
                              </div>
 
+                             {/* Provider Specific Settings */}
                              {modelConfig.provider === 'gemini' ? (
                                 <div className="space-y-2">
                                     <label className="text-xs font-semibold uppercase text-zinc-500">Model</label>
-                                    <select value={modelConfig.modelName} onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none">{AVAILABLE_MODELS.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select>
+                                    <select value={modelConfig.modelName} onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500">{AVAILABLE_MODELS.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select>
                                 </div>
                              ) : (
-                                <div className="space-y-3">
+                                <div className="space-y-3 bg-zinc-50 dark:bg-zinc-800/50 p-3 rounded-lg border border-zinc-100 dark:border-zinc-800">
                                      <div>
-                                        <label className="text-xs font-semibold uppercase text-zinc-500">Endpoint</label>
-                                        <input type="text" value={modelConfig.localEndpoint || ''} onChange={(e) => setModelConfig({...modelConfig, localEndpoint: e.target.value})} placeholder="http://127.0.0.1:8080/v1/chat/completions" className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm font-mono outline-none" />
+                                        <label className="text-xs font-semibold uppercase text-zinc-500">Endpoint URL</label>
+                                        <div className="flex gap-2">
+                                            <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Globe className="w-4 h-4"/></div>
+                                            <input type="text" value={modelConfig.localEndpoint || ''} onChange={(e) => setModelConfig({...modelConfig, localEndpoint: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-yellow-500" placeholder="https://api.example.com/v1/..." />
+                                        </div>
+                                     </div>
+                                     <div>
+                                        <label className="text-xs font-semibold uppercase text-zinc-500">API Key</label>
+                                        <div className="flex gap-2">
+                                            <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Settings2 className="w-4 h-4"/></div>
+                                            <input type="password" value={modelConfig.apiKey || ''} onChange={(e) => setModelConfig({...modelConfig, apiKey: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-yellow-500" placeholder="sk-..." />
+                                        </div>
                                      </div>
                                      <div>
                                         <label className="text-xs font-semibold uppercase text-zinc-500">Model Name</label>
-                                        <input type="text" value={modelConfig.modelName} onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none" />
+                                        <div className="flex gap-2">
+                                            <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Cpu className="w-4 h-4"/></div>
+                                            <input type="text" value={modelConfig.modelName} onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500" placeholder="e.g. gpt-4o, deepseek-chat" />
+                                        </div>
                                      </div>
                                 </div>
                              )}
 
-                             <div className="flex items-center justify-between pt-2">
-                                <div className="flex items-center gap-2">
-                                     <div className={`p-1.5 rounded ${modelConfig.useSimulation ? 'bg-purple-100 text-purple-600' : 'bg-zinc-100 text-zinc-500'}`}><TestTube className="w-4 h-4" /></div>
-                                     <div className="text-sm font-medium">Simulation Mode</div>
+                             {/* Generation Parameters */}
+                             <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-4">
+                                <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Generation Parameters</h4>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs text-zinc-500 flex justify-between mb-1">
+                                            <span>Temperature</span>
+                                            <span className="font-mono">{modelConfig.temperature}</span>
+                                        </label>
+                                        <input type="range" min="0" max="2" step="0.1" value={modelConfig.temperature} onChange={(e) => setModelConfig({...modelConfig, temperature: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-zinc-500 flex justify-between mb-1">
+                                            <span>Top P</span>
+                                            <span className="font-mono">{modelConfig.topP}</span>
+                                        </label>
+                                        <input type="range" min="0" max="1" step="0.05" value={modelConfig.topP} onChange={(e) => setModelConfig({...modelConfig, topP: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+                                    </div>
                                 </div>
-                                <button onClick={() => setModelConfig({...modelConfig, useSimulation: !modelConfig.useSimulation})} className={`w-10 h-6 rounded-full transition-colors relative ${modelConfig.useSimulation ? 'bg-purple-600' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
-                                    <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${modelConfig.useSimulation ? 'left-5' : 'left-1'}`} />
-                                </button>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs text-zinc-500 block mb-1">Max Output Tokens</label>
+                                        <input type="number" value={modelConfig.maxOutputTokens} onChange={(e) => setModelConfig({...modelConfig, maxOutputTokens: parseInt(e.target.value)})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500" />
+                                    </div>
+                                    <div className="flex flex-col justify-end">
+                                        <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                                            <div className="flex-1">
+                                                <div className="text-xs font-semibold">Simulation Mode</div>
+                                                <div className="text-[10px] text-zinc-500">Mock API calls</div>
+                                            </div>
+                                            <button onClick={() => setModelConfig({...modelConfig, useSimulation: !modelConfig.useSimulation})} className={`w-9 h-5 rounded-full transition-colors relative ${modelConfig.useSimulation ? 'bg-purple-600' : 'bg-zinc-300 dark:bg-zinc-600'}`}>
+                                                <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${modelConfig.useSimulation ? 'left-4.5' : 'left-0.5'}`} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                              </div>
+
                         </div>
-                        <button onClick={() => setShowModelSettings(false)} className="w-full py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold">Save Settings</button>
+                        <button onClick={() => setShowModelSettings(false)} className="w-full py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors">Apply Settings</button>
                     </div>
                 </div>
             )}

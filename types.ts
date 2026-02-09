@@ -95,7 +95,7 @@ export interface AssStyleConfig {
 }
 
 export interface ModelConfig {
-    provider: 'gemini' | 'local'; // Provider switch
+    provider: 'gemini' | 'local' | 'deepseek' | 'openai'; // Provider switch
     modelName: string; // Used for Gemini model ID or Local model ID
     temperature: number;
     topP: number;
@@ -103,4 +103,5 @@ export interface ModelConfig {
     maxOutputTokens: number;
     useSimulation?: boolean; 
     localEndpoint?: string; // URL for local provider
+    apiKey?: string; // Optional API Key for Cloud providers (DeepSeek/OpenAI)
 }

@@ -50,13 +50,20 @@ const parseJSONResponse = (text: string): Record<string, string> => {
 };
 
 /**
- * Call Local LLM (OpenAI Compatible)
+ * Call OpenAI Compatible API (Local LLM, DeepSeek, etc.)
  */
-const generateLocalContent = async (config: ModelConfig, prompt: string, systemInstruction?: string): Promise<string> => {
-    const endpoint = config.localEndpoint || 'http://127.0.0.1:8080/v1/chat/completions';
-    
-    // Fallback model name if empty
-    const model = config.modelName || 'local-model';
+const generateOpenAICompatibleContent = async (config: ModelConfig, prompt: string, systemInstruction?: string): Promise<string> => {
+    // Determine endpoint
+    let endpoint = config.localEndpoint;
+    if (!endpoint) {
+        if (config.provider === 'deepseek') endpoint = 'https://api.deepseek.com/chat/completions';
+        else if (config.provider === 'local') endpoint = 'http://127.0.0.1:8080/v1/chat/completions';
+    }
+
+    if (!endpoint) throw new Error("Endpoint is required for this provider.");
+
+    // Fallback model name
+    const model = config.modelName || (config.provider === 'deepseek' ? 'deepseek-chat' : 'local-model');
 
     const messages = [];
     if (systemInstruction) {
@@ -64,12 +71,18 @@ const generateLocalContent = async (config: ModelConfig, prompt: string, systemI
     }
     messages.push({ role: 'user', content: prompt });
 
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+    };
+
+    if (config.apiKey) {
+        headers['Authorization'] = `Bearer ${config.apiKey}`;
+    }
+
     try {
         const response = await fetch(endpoint, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: headers,
             body: JSON.stringify({
                 model: model,
                 messages: messages,
@@ -80,19 +93,20 @@ const generateLocalContent = async (config: ModelConfig, prompt: string, systemI
         });
 
         if (!response.ok) {
-            throw new Error(`Local LLM Error: ${response.status} ${response.statusText}`);
+            const errText = await response.text();
+            throw new Error(`${config.provider} API Error: ${response.status} - ${errText}`);
         }
 
         const data = await response.json();
         return data.choices?.[0]?.message?.content || "";
     } catch (e: any) {
-        console.error("Local LLM Call Failed", e);
-        throw new Error(`Local LLM Connection Failed: ${e.message}`);
+        console.error(`${config.provider} API Call Failed`, e);
+        throw new Error(`${config.provider} Connection Failed: ${e.message}`);
     }
 };
 
 /**
- * Unified generation function that switches between Gemini and Local.
+ * Unified generation function that switches between providers.
  */
 const queryAI = async (
     prompt: string, 
@@ -124,9 +138,9 @@ const queryAI = async (
         return "SIMULATION RESPONSE: " + prompt.substring(0, 50) + "...";
     }
 
-    // 2. Local LLM
-    if (config.provider === 'local') {
-        return await callWithTimeout(generateLocalContent(config, prompt, systemInstruction), 120000); // 2 min timeout for local
+    // 2. OpenAI Compatible Providers (DeepSeek, Local, Custom)
+    if (config.provider === 'local' || config.provider === 'deepseek' || config.provider === 'openai') {
+        return await callWithTimeout(generateOpenAICompatibleContent(config, prompt, systemInstruction), 120000); 
     }
 
     // 3. Gemini (Cloud)
