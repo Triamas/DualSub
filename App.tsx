@@ -961,7 +961,7 @@ function DualSubApp() {
                                     <select 
                                         value={targetLang}
                                         onChange={handleLanguageChange}
-                                        className="bg-transparent text-sm text-zinc-900 dark:text-zinc-200 focus:outline-none w-full cursor-pointer"
+                                        className="bg-transparent text-sm text-zinc-900 dark:text-zinc-200 focus:outline-none w-full cursor-pointer dark:[&>option]:bg-zinc-900 dark:[&>option]:text-zinc-200 [&>option]:bg-white [&>option]:text-zinc-900"
                                     >
                                         {AVAILABLE_LANGUAGES.map(lang => <option key={lang} value={lang}>{lang}</option>)}
                                     </select>
