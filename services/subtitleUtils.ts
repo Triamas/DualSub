@@ -1,3 +1,4 @@
+
 import { SubtitleLine, AssStyleConfig } from '../types';
 
 const CPS = 20; // Characters per second reading speed
@@ -14,6 +15,71 @@ const I_TAG_CLOSE = /<\/i>/gi;
 const U_TAG_OPEN = /<u>/gi;
 const U_TAG_CLOSE = /<\/u>/gi;
 const ANY_TAG = /<[^>]+>/g;
+
+/**
+ * Estimates token usage and cost based on character count and model pricing.
+ */
+export const estimateTokens = (subtitles: SubtitleLine[], modelId: string): { inputTokens: number, outputTokens: number, cost: string } => {
+    // Calculate total characters in source
+    const totalChars = subtitles.reduce((acc, sub) => acc + (sub.originalText?.length || 0), 0);
+    
+    // NMT Logic: Pricing based on characters, not tokens
+    if (modelId === 'google_nmt') {
+        // Google Cloud Translation v2: $20 per 1M chars.
+        // We display the raw cost based on this rate, ignoring the 500k free tier
+        // so users can see the "value" or cost impact of the file.
+        
+        const cost = (totalChars / 1_000_000) * 20.00;
+        let costString = `€${cost.toFixed(2)}`;
+        if (cost > 0 && cost < 0.01) costString = `< €0.01`;
+        
+        return { 
+            inputTokens: totalChars, // Pass chars as inputTokens for the UI counter
+            outputTokens: 0, 
+            cost: costString 
+        };
+    }
+
+    // LLM Logic: Pricing based on Tokens (approx 1 token = 4 chars)
+    
+    // Estimated Input: Source text + System Prompts (~1000 buffer)
+    const inputTokens = Math.ceil(totalChars / 4) + 1000;
+    
+    // Estimated Output: Translated text (approx 1:1 length ratio for many langs, safe buffer 1.2x)
+    const outputTokens = Math.ceil((totalChars / 4) * 1.2); 
+    
+    let priceInput = 0; // Per 1M tokens
+    let priceOutput = 0; // Per 1M tokens
+
+    // Pricing (approximate generic rates based on Gemini/OpenAI tiers in USD per 1M tokens)
+    if (modelId.includes('flash')) {
+        // Gemini 1.5 Flash / 2.5 Flash
+        priceInput = 0.075;
+        priceOutput = 0.30;
+    } else if (modelId.includes('pro')) {
+        // Gemini 1.5 Pro
+        priceInput = 1.25; 
+        priceOutput = 5.00;
+    } else if (modelId.includes('gpt-4o')) {
+        priceInput = 2.50;
+        priceOutput = 10.00;
+    } else if (modelId.includes('lite')) {
+        priceInput = 0.075; 
+        priceOutput = 0.30;
+    }
+    
+    // Local models are free
+    if (modelId.includes('local') || modelId.includes('llama') || modelId.includes('mistral')) {
+        return { inputTokens, outputTokens, cost: "Local (Free)" };
+    }
+
+    const totalCost = (inputTokens / 1_000_000 * priceInput) + (outputTokens / 1_000_000 * priceOutput);
+    
+    let costString = `€${totalCost.toFixed(4)}`;
+    if (totalCost > 0 && totalCost < 0.0001) costString = "< €0.0001";
+    
+    return { inputTokens, outputTokens, cost: costString };
+};
 
 /**
  * Strips HTML tags from text to get actual character count.
@@ -754,7 +820,7 @@ export const STYLE_PRESETS: { [key: string]: AssStyleConfig } = {
         outputFormat: 'ass',
         layout: 'stacked',
         stackOrder: 'secondary-top',
-        primary: { color: '#ffffff', fontSize: 65 },
+        primary: { color: '#dcdcdc', fontSize: 65 }, // Light grey (Gainsboro)
         secondary: { color: '#ffffff', fontSize: 65 },
         outlineWidth: 2,
         shadowDepth: 2,
@@ -786,7 +852,7 @@ export const STYLE_PRESETS: { [key: string]: AssStyleConfig } = {
         fontFamily: 'Arial Narrow',
         linesPerSubtitle: 1
     },
-    KODI: {
+    SIMPLE: {
         outputFormat: 'srt',
         layout: 'stacked',
         stackOrder: 'secondary-top',

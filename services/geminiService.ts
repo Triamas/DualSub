@@ -10,6 +10,16 @@ const getClient = () => {
     return new GoogleGenAI({ apiKey });
 };
 
+// Map display names to ISO-639 codes for Google Translate
+const LANGUAGE_CODES: Record<string, string> = {
+    "Arabic": "ar", "Bulgarian": "bg", "Chinese (Simplified)": "zh-CN", "Chinese (Traditional)": "zh-TW",
+    "Croatian": "hr", "Czech": "cs", "Danish": "da", "Dutch": "nl", "Estonian": "et", "Finnish": "fi",
+    "French": "fr", "German": "de", "Greek": "el", "Hindi": "hi", "Hungarian": "hu", "Indonesian": "id",
+    "Irish": "ga", "Italian": "it", "Japanese": "ja", "Korean": "ko", "Latvian": "lv", "Lithuanian": "lt",
+    "Maltese": "mt", "Polish": "pl", "Portuguese": "pt", "Romanian": "ro", "Slovak": "sk", "Slovenian": "sl",
+    "Spanish": "es", "Swedish": "sv", "Thai": "th", "Turkish": "tr", "Ukrainian": "uk", "Vietnamese": "vi"
+};
+
 /**
  * Wrapper to enforce a timeout on promises.
  */
@@ -50,20 +60,53 @@ const parseJSONResponse = (text: string): Record<string, string> => {
 };
 
 /**
+ * Calls Google Cloud Translation API (Basic v2)
+ */
+const translateWithGoogleNMT = async (
+    texts: string[],
+    targetLang: string,
+    apiKey: string
+): Promise<string[]> => {
+    const targetCode = LANGUAGE_CODES[targetLang] || 'en';
+    const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
+
+    const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            q: texts,
+            target: targetCode,
+            format: "text" // Use 'text' to prevent HTML escaping of regular chars, but 'html' if tags exist
+        })
+    });
+
+    if (!response.ok) {
+        const err = await response.json();
+        throw new Error(`Google Translate API Error: ${err.error?.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (data.data && data.data.translations) {
+        return data.data.translations.map((t: any) => t.translatedText);
+    }
+    return [];
+};
+
+/**
  * Call OpenAI Compatible API (Local LLM, DeepSeek, etc.)
  */
 const generateOpenAICompatibleContent = async (config: ModelConfig, prompt: string, systemInstruction?: string): Promise<string> => {
     // Determine endpoint
     let endpoint = config.localEndpoint;
     if (!endpoint) {
-        if (config.provider === 'deepseek') endpoint = 'https://api.deepseek.com/chat/completions';
-        else if (config.provider === 'local') endpoint = 'http://127.0.0.1:8080/v1/chat/completions';
+        if (config.provider === 'local') endpoint = 'http://127.0.0.1:8080/v1/chat/completions';
+        else if (config.provider === 'openai') endpoint = 'https://api.openai.com/v1/chat/completions';
     }
 
     if (!endpoint) throw new Error("Endpoint is required for this provider.");
 
     // Fallback model name
-    const model = config.modelName || (config.provider === 'deepseek' ? 'deepseek-chat' : 'local-model');
+    const model = config.modelName || 'local-model';
 
     const messages = [];
     if (systemInstruction) {
@@ -138,12 +181,17 @@ const queryAI = async (
         return "SIMULATION RESPONSE: " + prompt.substring(0, 50) + "...";
     }
 
-    // 2. OpenAI Compatible Providers (DeepSeek, Local, Custom)
-    if (config.provider === 'local' || config.provider === 'deepseek' || config.provider === 'openai') {
+    // 2. Google NMT Guard
+    if (config.provider === 'google_nmt') {
+        throw new Error("Generative Context/Bible features are not available when using Google Translate (NMT). Switch to an LLM provider (Gemini/OpenAI) to use these features.");
+    }
+
+    // 3. OpenAI Compatible Providers (Local, Custom)
+    if (config.provider === 'local' || config.provider === 'openai') {
         return await callWithTimeout(generateOpenAICompatibleContent(config, prompt, systemInstruction), 120000); 
     }
 
-    // 3. Gemini (Cloud)
+    // 4. Gemini (Cloud)
     const ai = getClient();
     try {
         // 45 Seconds Hard Timeout for Gemini API calls
@@ -192,6 +240,9 @@ export const identifyShowName = async (filename: string, useSimulation: boolean 
         return "Simulated Show Title";
     }
 
+    // Skip if NMT
+    if (config.provider === 'google_nmt') return filename;
+
     try {
         const prompt = `Extract the official Movie or TV Show title from this filename: "${filename}". 
         
@@ -227,6 +278,9 @@ export const generateContext = async (filename: string, useSimulation: boolean =
         return "SIMULATION: This is a generated context for testing purposes. It simulates a plot summary derived from the filename.";
     }
 
+    // Skip if NMT
+    if (config.provider === 'google_nmt') return "";
+
     try {
         const prompt = `Identify the movie or TV show from this filename: "${filename}". 
             
@@ -260,6 +314,9 @@ export const generateShowBible = async (filename: string, targetLanguage: string
         await new Promise(r => setTimeout(r, 1500));
         return "SIMULATION GLOSSARY:\nJohn Doe - Protagonist | Pronouns: Anh/Em\nJane Doe - Sister | Pronouns: Chị/Em\nVillain - Antagonist | Pronouns: Hắn/Tao";
     }
+
+    // Skip if NMT
+    if (config.provider === 'google_nmt') return "";
 
     try {
         const prompt = `You are a Localization Expert constructing a "Show Bible" for the video file: "${filename}".
@@ -301,6 +358,9 @@ export const detectLanguage = async (lines: SubtitleLine[], useSimulation: boole
         await new Promise(r => setTimeout(r, 600));
         return { isEnglish: true, language: 'English (Simulated)' };
     }
+
+    // Skip if NMT (assume English source for simplicity or just skip detection step in UI logic)
+    if (config.provider === 'google_nmt') return { isEnglish: true, language: 'English' };
 
     const sample = lines
         .filter(l => l.originalText.length > 5) 
@@ -354,6 +414,42 @@ export const translateBatch = async (
 
   const performTranslation = async (linesToProcess: SubtitleLine[], isRetry: boolean): Promise<Map<number, string>> => {
       
+      // --- GOOGLE NMT PATH ---
+      if (modelConfig.provider === 'google_nmt') {
+          if (onLog) onLog(`Sending Batch to Google Translate (${linesToProcess.length} lines)`, 'request');
+          
+          if (modelConfig.useSimulation) {
+              await new Promise(r => setTimeout(r, 800));
+              const resultMap = new Map<number, string>();
+              linesToProcess.forEach(l => resultMap.set(l.id, "[NMT SIMULATED] " + l.originalText));
+              return resultMap;
+          }
+
+          if (!modelConfig.apiKey) throw new Error("Google Cloud API Key is required for NMT.");
+
+          const texts = linesToProcess.map(l => l.originalText);
+          try {
+              const translations = await translateWithGoogleNMT(texts, targetLanguage, modelConfig.apiKey);
+              const resultMap = new Map<number, string>();
+              
+              linesToProcess.forEach((line, index) => {
+                  if (translations[index]) {
+                      // NMT usually preserves HTML entities, but let's ensure breaks are handled if needed.
+                      // Google Translate often preserves <br> tags if passed, but our internal representation uses [br].
+                      // The helper below might need to swap [br] back if we want NMT to respect it, but NMT treats text as plain usually.
+                      resultMap.set(line.id, translations[index]); 
+                  }
+              });
+              if (onLog) onLog(`Received NMT Response`, 'response', translations);
+              return resultMap;
+          } catch (e: any) {
+              if (onLog) onLog(`NMT Failed`, 'error', e.message);
+              throw e;
+          }
+      }
+
+      // --- LLM PATH (Gemini/OpenAI/Local) ---
+
       // 1. Build Payload (JSON)
       const chunkPayload: Record<string, string> = {};
       linesToProcess.forEach(l => {
@@ -430,6 +526,9 @@ RESPONSE (JSON ONLY):`;
   const initialResults = await performTranslation(lines, false);
   
   // 2. Length Check & Retry Logic (Simplified for JSON flow)
+  // Skip retry logic for NMT as it is deterministic
+  if (modelConfig.provider === 'google_nmt') return initialResults;
+
   const linesToRetry: SubtitleLine[] = [];
   const finalResults = new Map<number, string>(initialResults);
 

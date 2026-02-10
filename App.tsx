@@ -1,10 +1,12 @@
+
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Type, Cog, X, AlignJustify, AlignLeft, Cpu, FileType, Hourglass, ChevronsRight, Eye, ArrowUp, ArrowDown, Moon, Sun, BookOpen, Edit3, Save, ScrollText, Terminal, TestTube, Globe, Server, FileInput, CloudCog } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertTriangle, RefreshCw, Download as DownloadIcon, PlayCircle, Sparkles, Languages, Settings2, Layout, Palette, ArrowUpDown, RotateCcw, Monitor, Trash2, Layers, Film, Tv, Type, Cog, X, AlignJustify, AlignLeft, Cpu, FileType, Hourglass, ChevronsRight, Eye, ArrowUp, ArrowDown, Moon, Sun, BookOpen, Edit3, Save, ScrollText, Terminal, TestTube, Globe, Server, FileInput, CloudCog, Coins, HelpCircle } from 'lucide-react';
 import { SubtitleLine, TabView, AssStyleConfig, BatchItem, ModelConfig, LogEntry } from './types';
-import { parseSubtitle, generateSubtitleContent, downloadFile, STYLE_PRESETS, calculateSafeDurations, mergeAndOptimizeSubtitles } from './services/subtitleUtils';
+import { parseSubtitle, generateSubtitleContent, downloadFile, STYLE_PRESETS, calculateSafeDurations, mergeAndOptimizeSubtitles, estimateTokens } from './services/subtitleUtils';
 import { translateBatch, generateContext, detectLanguage, generateShowBible, identifyShowName } from './services/geminiService';
 import { saveSession, loadSession, clearSession, loadShowMetadata, saveShowMetadata } from './services/storage';
 import SubtitleSearch from './components/OpenSubtitlesSearch';
+import { ToastProvider, useToast } from './components/Toast';
 
 // OPTIMIZED CONSTANTS FOR STABILITY
 const BATCH_SIZE = 40;  
@@ -25,12 +27,43 @@ const AVAILABLE_MODELS = [
     { id: 'gemini-flash-lite-latest', name: 'Gemini 2.5 Flash Lite (Fastest)' }
 ];
 
+const OPENAI_PRESETS = [
+    { label: "OpenAI", options: [
+        { id: "gpt-4o", name: "GPT-4o" },
+        { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
+        { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" }
+    ]},
+    { label: "DeepSeek", options: [
+        { id: "deepseek-chat", name: "DeepSeek Chat (V3)" },
+        { id: "deepseek-reasoner", name: "DeepSeek Reasoner (R1)" }
+    ]},
+    { label: "Mistral", options: [
+        { id: "mistral-large-latest", name: "Mistral Large" },
+        { id: "mistral-small-latest", name: "Mistral Small" }
+    ]},
+    { label: "Groq (Llama)", options: [
+        { id: "llama3-70b-8192", name: "Llama 3 70B" },
+        { id: "llama3-8b-8192", name: "Llama 3 8B" }
+    ]},
+    { label: "Anthropic (via Proxy)", options: [
+        { id: "claude-3-opus-20240229", name: "Claude 3 Opus" },
+        { id: "claude-3-5-sonnet-20240620", name: "Claude 3.5 Sonnet" }
+    ]}
+];
+
 const KODI_FONTS = [
     "Arial", "Arial Narrow", "Arial Black", "Comic Sans MS", "Courier New", 
     "DejaVu Sans", "Georgia", "Impact", "Times New Roman", "Trebuchet MS", "Verdana", "Teletext"
 ];
 
 // --- COMPONENTS ---
+
+const InfoTooltip = ({ text }: { text: string }) => (
+    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-zinc-900 dark:bg-zinc-800 text-white text-xs leading-relaxed rounded-lg shadow-xl border border-zinc-700/50 hidden group-hover:block z-[100] pointer-events-none animate-in fade-in slide-in-from-bottom-1 duration-200">
+        {text}
+        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-900 dark:border-t-zinc-800"></div>
+    </div>
+);
 
 const VisualPreview = ({ 
     config, 
@@ -194,9 +227,9 @@ const VisualPreview = ({
     );
 };
 
-// --- MAIN APP ---
+// --- MAIN APP CONTENT (Refactored to support ToastProvider wrapper) ---
 
-function App() {
+function DualSubApp() {
   // Theme State
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
   const [activeTab, setActiveTab] = useState<TabView>(TabView.UPLOAD);
@@ -224,10 +257,37 @@ function App() {
       apiKey: ''
   });
   const [showModelSettings, setShowModelSettings] = useState(false);
+  const [customModelMode, setCustomModelMode] = useState(false);
 
-  // Style Configuration State - Hidden by default
-  const [styleConfig, setStyleConfig] = useState<AssStyleConfig>(STYLE_PRESETS.DEFAULT);
+  // Check if current OpenAI model is custom or preset
+  useEffect(() => {
+    if (modelConfig.provider === 'openai') {
+        const isPreset = OPENAI_PRESETS.some(grp => grp.options.some(opt => opt.id === modelConfig.modelName));
+        setCustomModelMode(!isPreset && modelConfig.modelName !== 'gpt-4o');
+    }
+  }, [modelConfig.provider]);
+
+  // Style Configuration State - Load from localStorage if available
+  const [styleConfig, setStyleConfig] = useState<AssStyleConfig>(() => {
+    try {
+        const saved = localStorage.getItem('user_style_config');
+        return saved ? JSON.parse(saved) : STYLE_PRESETS.DEFAULT;
+    } catch {
+        return STYLE_PRESETS.DEFAULT;
+    }
+  });
   const [showStyleConfig, setShowStyleConfig] = useState(false);
+  
+  // Toast
+  const { addToast } = useToast();
+
+  // Token Estimator State
+  const [estimation, setEstimation] = useState<{ cost: string, count: number } | null>(null);
+
+  // Auto-save style configuration changes
+  useEffect(() => {
+    localStorage.setItem('user_style_config', JSON.stringify(styleConfig));
+  }, [styleConfig]);
 
   // Confirmation Request State
   const [confirmationRequest, setConfirmationRequest] = useState<{ itemId: string; fileName: string; detectedLanguage: string; resolve: (val: boolean) => void } | null>(null);
@@ -306,6 +366,18 @@ function App() {
       }
   }, [activeItemId, activeItem, previewLineId]);
 
+  // Cost Estimation Effect
+  useEffect(() => {
+      if (!activeItem) {
+          setEstimation(null);
+          return;
+      }
+      // Calculate only for pending lines to be useful for "Translate" action context
+      // Or just total file for general info. Let's do Total File Cost as that is most informative.
+      const { inputTokens, outputTokens, cost } = estimateTokens(activeItem.subtitles, modelConfig.modelName);
+      setEstimation({ cost, count: inputTokens + outputTokens });
+  }, [activeItem, modelConfig.modelName]);
+
   // Preview Data
   const selectedSubtitle = activeItem?.subtitles?.find(s => s.id === previewLineId);
   const sampleOriginal = selectedSubtitle?.originalText || "Select a subtitle line to preview style.";
@@ -319,7 +391,13 @@ function App() {
   };
 
   const applyPreset = (presetName: keyof typeof STYLE_PRESETS) => setStyleConfig(STYLE_PRESETS[presetName]);
-  const resetStyles = () => setStyleConfig(STYLE_PRESETS.DEFAULT);
+  
+  const resetStyles = () => {
+      if (window.confirm("Reset all style settings to factory defaults?")) {
+        setStyleConfig(STYLE_PRESETS.DEFAULT);
+        addToast("Style settings reset to default", "info");
+      }
+  };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -337,6 +415,7 @@ function App() {
 
     const fileList = Array.from(files);
     const results = await Promise.all(fileList.map(readFile));
+    let addedCount = 0;
     
     // Parse all files first
     const parsedFiles = results.map(({ file, content }) => {
@@ -380,6 +459,7 @@ function App() {
                     message: `Merged: ${pFile.file.name}`
                 };
                 usedIndices.add(idx);
+                addToast(`Merged ${pFile.file.name} into existing item`, 'success');
             }
         });
 
@@ -433,20 +513,13 @@ function App() {
                 message: message,
                 logs: []
             });
+            addedCount++;
         });
-
-        // Auto-select first item if queue was empty
-        if (nextBatch.length === 0 && newBatchItems.length > 0) {
-            // Need to set ActiveItemId, but can't do it inside setState callback strictly cleanly
-            // But we can defer it or rely on useEffect. 
-            // Actually, we can assume the user wants to see the first new item if nothing else is there.
-        }
-
+        
         return [...nextBatch, ...newBatchItems];
     });
 
-    // Handle Active Item Selection Logic after state update
-    // We can't rely on `nextBatch` here, but useEffect checks activeItemId vs batchItems
+    if (addedCount > 0) addToast(`Added ${addedCount} files to queue`, 'success');
     
     // Clear input
     event.target.value = '';
@@ -479,9 +552,9 @@ function App() {
                         message: 'Translation Imported & Optimized'
                     };
                 }));
-                
+                addToast("Translation merged successfully", "success");
             } catch (err) {
-                alert("Failed to parse imported translation file.");
+                addToast("Failed to parse imported translation file", "error");
             }
         };
         reader.readAsText(file);
@@ -505,8 +578,9 @@ function App() {
           setBatchItems(prev => [...prev, newItem]);
           setActiveItemId(newItem.id);
           setActiveTab(TabView.UPLOAD);
+          addToast(`Loaded subtitle: ${name}`, 'success');
       } catch (err) {
-          alert("Failed to parse the downloaded subtitle.");
+          addToast("Failed to parse the downloaded subtitle", "error");
       }
   };
   
@@ -650,16 +724,33 @@ function App() {
       // Final Verification (Simplified for brevity in update)
       if (!isCancelled.current) {
           setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, status: 'completed', progress: 100, message: 'Done' } : pi));
+          addToast(`Translation completed: ${item.fileName}`, 'success');
       }
   };
 
   const handleTranslateAll = async () => {
-      if (!modelConfig.useSimulation && modelConfig.provider === 'gemini' && !process.env.API_KEY) { 
-          alert("System Error: Gemini API Key is missing."); return; 
+      // API Key Check logic
+      if (!modelConfig.useSimulation) {
+           if (modelConfig.provider === 'gemini' && !process.env.API_KEY) { 
+               addToast("System Error: Gemini API Key is missing.", "error"); return; 
+           }
+           if (modelConfig.provider === 'google_nmt' && !modelConfig.apiKey) {
+               addToast("System Error: Google Cloud API Key is missing for NMT.", "error"); return;
+           }
       }
+
       isCancelled.current = false;
       isTranslating.current = true;
       const pendingItems = batchItems.filter(i => i.status === 'pending' || i.status === 'error');
+      
+      if (pendingItems.length === 0) {
+          addToast("No pending files to translate", "info");
+          isTranslating.current = false;
+          return;
+      }
+      
+      addToast(`Starting translation for ${pendingItems.length} files...`, "info");
+      
       for (const item of pendingItems) {
           if (isCancelled.current) break;
           await translateSingleFile(item.id);
@@ -673,10 +764,14 @@ function App() {
       const content = generateSubtitleContent(item.subtitles, styleConfig, smartTiming);
       const ext = styleConfig.outputFormat === 'srt' ? '.srt' : '.ass';
       downloadFile(content, item.fileName.replace(/\.(srt|ass|vtt)$/i, '') + ext);
+      addToast(`Downloaded ${item.fileName}`, 'success');
   };
 
   const handleDownloadAll = async () => {
       const completedItems = batchItems.filter(i => i.status === 'completed');
+      if (completedItems.length === 0) return;
+      
+      addToast(`Downloading ${completedItems.length} files...`, 'info');
       for (const item of completedItems) {
           handleDownloadSingle(item.id);
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -696,6 +791,7 @@ function App() {
         setBatchItems([]);
         setActiveItemId(null);
         clearSession();
+        addToast("Workspace cleared", "info");
       }
   };
 
@@ -705,12 +801,22 @@ function App() {
   // Set default configurations when switching providers
   const handleProviderChange = (provider: ModelConfig['provider']) => {
       const newConfig = { ...modelConfig, provider };
+      
       if (provider === 'gemini') {
           newConfig.modelName = 'gemini-3-flash-preview';
           newConfig.apiKey = ''; // Reset custom key, use env
-      } else if (provider === 'deepseek') {
-          newConfig.modelName = 'deepseek-chat';
-          newConfig.localEndpoint = 'https://api.deepseek.com/chat/completions';
+      } else if (provider === 'google_nmt') {
+          // Reset NMT config
+          newConfig.modelName = 'google_nmt';
+          newConfig.apiKey = ''; // Requires user input
+          
+          // NMT doesn't support context features
+          if (autoContext || autoBible) {
+              addToast("Context features disabled for Google Translate", "info");
+              setAutoContext(false);
+              setAutoBible(false);
+          }
+
       } else if (provider === 'local') {
           newConfig.modelName = 'llama3';
           newConfig.localEndpoint = 'http://127.0.0.1:8080/v1/chat/completions';
@@ -721,6 +827,18 @@ function App() {
           newConfig.localEndpoint = 'https://api.openai.com/v1/chat/completions';
       }
       setModelConfig(newConfig);
+      addToast(`Switched provider to ${provider}`, 'info');
+  };
+
+  const handleOpenAIModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const val = e.target.value;
+      if (val === 'custom') {
+          setCustomModelMode(true);
+          setModelConfig({ ...modelConfig, modelName: '' });
+      } else {
+          setCustomModelMode(false);
+          setModelConfig({ ...modelConfig, modelName: val });
+      }
   };
 
   return (
@@ -836,7 +954,7 @@ function App() {
                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             
                             {/* Command Center Bar */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-1.5 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl backdrop-blur-md">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 p-1.5 bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-xl backdrop-blur-md">
                                  {/* Target Lang */}
                                  <div className="flex items-center gap-2 bg-white dark:bg-zinc-950/50 rounded-lg px-3 py-2 border border-zinc-200 dark:border-zinc-800 focus-within:border-yellow-500/50 transition-colors">
                                     <Languages className="w-4 h-4 text-zinc-500" />
@@ -851,10 +969,32 @@ function App() {
 
                                  {/* Toggles */}
                                  <div className="flex items-center justify-between gap-1">
-                                    <button onClick={() => setAutoContext(!autoContext)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-all ${autoContext ? 'bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-300' : 'bg-white dark:bg-zinc-950/50 border-zinc-200 dark:border-zinc-800 text-zinc-500'}`}>
+                                    <button 
+                                        onClick={() => { if(modelConfig.provider !== 'google_nmt') setAutoContext(!autoContext); }} 
+                                        disabled={modelConfig.provider === 'google_nmt'}
+                                        title={modelConfig.provider === 'google_nmt' ? "Not available with Google Translate" : "Enable Context Awareness"}
+                                        className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-all ${
+                                            modelConfig.provider === 'google_nmt' 
+                                            ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-200 dark:border-zinc-700 cursor-not-allowed opacity-60'
+                                            : autoContext 
+                                                ? 'bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-300' 
+                                                : 'bg-white dark:bg-zinc-950/50 border-zinc-200 dark:border-zinc-800 text-zinc-500'
+                                        }`}
+                                    >
                                         <Sparkles className="w-3 h-3" /> Context
                                     </button>
-                                    <button onClick={() => setAutoBible(!autoBible)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-all ${autoBible ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-300' : 'bg-white dark:bg-zinc-950/50 border-zinc-200 dark:border-zinc-800 text-zinc-500'}`}>
+                                    <button 
+                                        onClick={() => { if(modelConfig.provider !== 'google_nmt') setAutoBible(!autoBible); }} 
+                                        disabled={modelConfig.provider === 'google_nmt'}
+                                        title={modelConfig.provider === 'google_nmt' ? "Not available with Google Translate" : "Enable Glossary/Show Bible"}
+                                        className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-all ${
+                                            modelConfig.provider === 'google_nmt' 
+                                            ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-200 dark:border-zinc-700 cursor-not-allowed opacity-60'
+                                            : autoBible 
+                                                ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-300' 
+                                                : 'bg-white dark:bg-zinc-950/50 border-zinc-200 dark:border-zinc-800 text-zinc-500'
+                                        }`}
+                                    >
                                         <BookOpen className="w-3 h-3" /> Glossary
                                     </button>
                                     <button onClick={() => setSmartTiming(!smartTiming)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-all ${smartTiming ? 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-300' : 'bg-white dark:bg-zinc-950/50 border-zinc-200 dark:border-zinc-800 text-zinc-500'}`}>
@@ -863,52 +1003,97 @@ function App() {
                                  </div>
                             </div>
 
-                            {/* Main Actions */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={handleTranslateAll}
-                                        disabled={isTranslating.current}
-                                        className={`flex-1 group relative p-4 rounded-xl flex items-center justify-center gap-3 transition-all overflow-hidden ${
-                                            isTranslating.current 
-                                            ? 'bg-zinc-200 dark:bg-zinc-800 cursor-not-allowed text-zinc-500'
-                                            : 'bg-yellow-500 text-black font-bold hover:shadow-[0_0_30px_-10px_rgba(234,179,8,0.5)] hover:scale-[1.02]'
-                                        }`}
-                                    >
-                                        {isTranslating.current ? 'Processing...' : <><RefreshCw className="w-5 h-5 transition-transform group-hover:rotate-180" /> <span>Translate</span></>}
-                                    </button>
-                                    
-                                    <button
-                                        className="relative p-4 rounded-xl flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-200 font-bold transition-all border border-zinc-300 dark:border-zinc-700 w-16 group"
-                                        title="Import translated file to merge"
-                                    >
-                                        <FileInput className="w-5 h-5" />
-                                        <div className="absolute bottom-full mb-2 hidden group-hover:block bg-black text-white text-xs px-2 py-1 rounded whitespace-nowrap">Merge Translation</div>
-                                        <input 
-                                            type="file" 
-                                            accept=".srt,.ass,.ssa,.vtt" 
-                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                            onChange={handleImportTranslation}
-                                        />
-                                    </button>
-                                </div>
+                            {/* Main Actions & Cost Estimator */}
+                            <div className="flex flex-col gap-3">
+                                {/* Actions Row */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={handleTranslateAll}
+                                            disabled={isTranslating.current}
+                                            className={`flex-1 group relative p-4 rounded-xl flex items-center justify-center gap-3 transition-all overflow-hidden ${
+                                                isTranslating.current 
+                                                ? 'bg-zinc-200 dark:bg-zinc-800 cursor-not-allowed text-zinc-500'
+                                                : 'bg-yellow-500 text-black font-bold hover:shadow-[0_0_30px_-10px_rgba(234,179,8,0.5)] hover:scale-[1.02]'
+                                            }`}
+                                        >
+                                            {isTranslating.current ? 'Processing...' : <><RefreshCw className="w-5 h-5 transition-transform group-hover:rotate-180" /> <span>Translate</span></>}
+                                        </button>
+                                        
+                                        <button
+                                            className="relative p-4 rounded-xl flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-200 font-bold transition-all border border-zinc-300 dark:border-zinc-700 w-16 group"
+                                            title="Import translated file to merge"
+                                        >
+                                            <FileInput className="w-5 h-5" />
+                                            <div className="absolute bottom-full mb-2 hidden group-hover:block bg-black text-white text-xs px-2 py-1 rounded whitespace-nowrap">Merge Translation</div>
+                                            <input 
+                                                type="file" 
+                                                accept=".srt,.ass,.ssa,.vtt" 
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                onChange={handleImportTranslation}
+                                            />
+                                        </button>
+                                    </div>
 
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={handleDownloadAll}
-                                        disabled={completedCount === 0}
-                                        className="flex-1 py-3 px-4 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <DownloadIcon className="w-4 h-4" /> 
-                                        {getDownloadLabel()}
-                                    </button>
-                                    <button 
-                                        onClick={() => setShowStyleConfig(!showStyleConfig)}
-                                        className={`px-4 rounded-xl transition-all border ${showStyleConfig ? 'bg-zinc-200 dark:bg-zinc-200 text-black border-zinc-300' : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-500'}`}
-                                    >
-                                        <Settings2 className="w-5 h-5" />
-                                    </button>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={handleDownloadAll}
+                                            disabled={completedCount === 0}
+                                            className="flex-1 py-3 px-4 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <DownloadIcon className="w-4 h-4" /> 
+                                            {getDownloadLabel()}
+                                        </button>
+                                        <button 
+                                            onClick={() => setShowStyleConfig(!showStyleConfig)}
+                                            className={`px-4 rounded-xl transition-all border ${showStyleConfig ? 'bg-zinc-200 dark:bg-zinc-200 text-black border-zinc-300' : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-500'}`}
+                                        >
+                                            <Settings2 className="w-5 h-5" />
+                                        </button>
+                                    </div>
                                 </div>
+                                
+                                {/* Token & Cost Estimator Pill */}
+                                {activeItem && !activeItem.translatedText && (
+                                    <div className="flex justify-center">
+                                        <div 
+                                            className="relative group inline-flex items-center gap-4 bg-zinc-100 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-full px-4 py-1.5 shadow-sm cursor-help transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-900"
+                                        >
+                                            <InfoTooltip text={modelConfig.provider === 'google_nmt' 
+                                                ? "Cost based on total character count (€20.00 per 1 Million characters)." 
+                                                : "Estimated cost based on Input Tokens (Source Text + Prompt) and Output Tokens (Translation). Prices vary by model."} 
+                                            />
+                                            <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                                                <Cpu className="w-3.5 h-3.5" />
+                                                <span>{modelConfig.modelName === 'google_nmt' ? 'Google Translate (NMT)' : modelConfig.modelName.split('/').pop()?.replace('-preview', '')}</span>
+                                            </div>
+                                            <div className="w-px h-3 bg-zinc-300 dark:bg-zinc-700"></div>
+                                            {estimation ? (
+                                                <div className="flex items-center gap-3">
+                                                    {modelConfig.provider === 'google_nmt' ? (
+                                                        // NMT shows characters, not tokens
+                                                        <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300">
+                                                            <Type className="w-3.5 h-3.5" />
+                                                            <span>~{(estimation.count).toLocaleString()} chars</span>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300">
+                                                            <ScrollText className="w-3.5 h-3.5" />
+                                                            <span>~{(estimation.count / 1000).toFixed(1)}k tokens</span>
+                                                        </div>
+                                                    )}
+                                                    
+                                                    <div className="flex items-center gap-1.5 text-xs font-bold text-green-600 dark:text-green-400">
+                                                        <Coins className="w-3.5 h-3.5" />
+                                                        <span>{estimation.cost}</span>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-zinc-400 italic">Calculating estimate...</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                            {/* Collapsible Style Inspector & Preview - RESTRUCTURED */}
@@ -1124,19 +1309,34 @@ function App() {
                                  <label className="text-xs font-semibold uppercase text-zinc-500 mb-2 block">AI Provider</label>
                                  <div className="grid grid-cols-2 gap-2">
                                      <button onClick={() => handleProviderChange('gemini')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'gemini' ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>Gemini (Google)</button>
-                                     <button onClick={() => handleProviderChange('deepseek')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'deepseek' ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>DeepSeek</button>
+                                     <button onClick={() => handleProviderChange('google_nmt')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'google_nmt' ? 'bg-orange-50 dark:bg-orange-900/30 border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>Google Translate</button>
                                      <button onClick={() => handleProviderChange('local')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'local' ? 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>Local (Ollama)</button>
                                      <button onClick={() => handleProviderChange('openai')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'openai' ? 'bg-teal-50 dark:bg-teal-900/30 border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>OpenAI / Other</button>
                                  </div>
                              </div>
 
                              {/* Provider Specific Settings */}
-                             {modelConfig.provider === 'gemini' ? (
+                             {modelConfig.provider === 'gemini' && (
                                 <div className="space-y-2">
                                     <label className="text-xs font-semibold uppercase text-zinc-500">Model</label>
                                     <select value={modelConfig.modelName} onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500">{AVAILABLE_MODELS.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select>
                                 </div>
-                             ) : (
+                             )}
+
+                             {modelConfig.provider === 'google_nmt' && (
+                                 <div className="space-y-3 bg-zinc-50 dark:bg-zinc-800/50 p-3 rounded-lg border border-zinc-100 dark:border-zinc-800">
+                                      <div>
+                                         <label className="text-xs font-semibold uppercase text-zinc-500">Google Cloud API Key</label>
+                                         <div className="flex gap-2">
+                                             <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Settings2 className="w-4 h-4"/></div>
+                                             <input type="password" value={modelConfig.apiKey || ''} onChange={(e) => setModelConfig({...modelConfig, apiKey: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-yellow-500" placeholder="AIzaSy..." />
+                                         </div>
+                                         <p className="text-[10px] text-zinc-500 mt-1">Requires 'Cloud Translation API' enabled in Google Cloud Console.</p>
+                                      </div>
+                                 </div>
+                             )}
+
+                             {(modelConfig.provider === 'local' || modelConfig.provider === 'openai') && (
                                 <div className="space-y-3 bg-zinc-50 dark:bg-zinc-800/50 p-3 rounded-lg border border-zinc-100 dark:border-zinc-800">
                                      <div>
                                         <label className="text-xs font-semibold uppercase text-zinc-500">Endpoint URL</label>
@@ -1152,55 +1352,106 @@ function App() {
                                             <input type="password" value={modelConfig.apiKey || ''} onChange={(e) => setModelConfig({...modelConfig, apiKey: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-yellow-500" placeholder="sk-..." />
                                         </div>
                                      </div>
-                                     <div>
-                                        <label className="text-xs font-semibold uppercase text-zinc-500">Model Name</label>
-                                        <div className="flex gap-2">
-                                            <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Cpu className="w-4 h-4"/></div>
-                                            <input type="text" value={modelConfig.modelName} onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500" placeholder="e.g. gpt-4o, deepseek-chat" />
+                                     
+                                     {modelConfig.provider === 'openai' ? (
+                                        <div>
+                                            <label className="text-xs font-semibold uppercase text-zinc-500 mb-1 block">Model Selection</label>
+                                            <select 
+                                                value={customModelMode ? 'custom' : modelConfig.modelName} 
+                                                onChange={handleOpenAIModelChange} 
+                                                className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500 mb-2"
+                                            >
+                                                <option value="" disabled>Select a model...</option>
+                                                {OPENAI_PRESETS.map((group) => (
+                                                    <optgroup key={group.label} label={group.label}>
+                                                        {group.options.map(opt => (
+                                                            <option key={opt.id} value={opt.id}>{opt.name}</option>
+                                                        ))}
+                                                    </optgroup>
+                                                ))}
+                                                <option value="custom">Custom / Other...</option>
+                                            </select>
+                                            
+                                            {customModelMode && (
+                                                <div className="flex gap-2 animate-in fade-in slide-in-from-top-1">
+                                                    <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Cpu className="w-4 h-4"/></div>
+                                                    <input 
+                                                        type="text" 
+                                                        value={modelConfig.modelName} 
+                                                        onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} 
+                                                        className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500" 
+                                                        placeholder="Enter custom model ID (e.g. gpt-4-32k)" 
+                                                        autoFocus
+                                                    />
+                                                </div>
+                                            )}
                                         </div>
-                                     </div>
+                                     ) : (
+                                        <div>
+                                            <label className="text-xs font-semibold uppercase text-zinc-500">Model Name</label>
+                                            <div className="flex gap-2">
+                                                <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Cpu className="w-4 h-4"/></div>
+                                                <input type="text" value={modelConfig.modelName} onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500" placeholder="e.g. llama3" />
+                                            </div>
+                                        </div>
+                                     )}
                                 </div>
                              )}
 
-                             {/* Generation Parameters */}
-                             <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-4">
-                                <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Generation Parameters</h4>
-                                
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-xs text-zinc-500 flex justify-between mb-1">
-                                            <span>Temperature</span>
-                                            <span className="font-mono">{modelConfig.temperature}</span>
-                                        </label>
-                                        <input type="range" min="0" max="2" step="0.1" value={modelConfig.temperature} onChange={(e) => setModelConfig({...modelConfig, temperature: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+                             {/* Generation Parameters (Hidden for NMT) */}
+                             {modelConfig.provider !== 'google_nmt' && (
+                                <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-4">
+                                    <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Generation Parameters</h4>
+                                    
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs text-zinc-500 flex justify-between items-center mb-1">
+                                                <div className="flex items-center gap-1 relative group">
+                                                    <span>Temperature</span>
+                                                    <HelpCircle className="w-3 h-3 text-zinc-400 cursor-help" />
+                                                    <InfoTooltip text="Controls randomness. Lower values (e.g. 0.2) result in more deterministic and consistent translations. Higher values (e.g. 0.8) allow for more creative or varied output." />
+                                                </div>
+                                                <span className="font-mono">{modelConfig.temperature}</span>
+                                            </label>
+                                            <input type="range" min="0" max="2" step="0.1" value={modelConfig.temperature} onChange={(e) => setModelConfig({...modelConfig, temperature: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-zinc-500 flex justify-between items-center mb-1">
+                                                <div className="flex items-center gap-1 relative group">
+                                                    <span>Top P</span>
+                                                    <HelpCircle className="w-3 h-3 text-zinc-400 cursor-help" />
+                                                    <InfoTooltip text="Nucleus sampling. Limits the model to the top P percentage of probability mass. Lower values (e.g. 0.5) limit vocabulary to the most likely words. Higher values (e.g. 0.95) allow for a wider vocabulary range." />
+                                                </div>
+                                                <span className="font-mono">{modelConfig.topP}</span>
+                                            </label>
+                                            <input type="range" min="0" max="1" step="0.05" value={modelConfig.topP} onChange={(e) => setModelConfig({...modelConfig, topP: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="text-xs text-zinc-500 flex justify-between mb-1">
-                                            <span>Top P</span>
-                                            <span className="font-mono">{modelConfig.topP}</span>
-                                        </label>
-                                        <input type="range" min="0" max="1" step="0.05" value={modelConfig.topP} onChange={(e) => setModelConfig({...modelConfig, topP: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
-                                    </div>
-                                </div>
-                                
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-xs text-zinc-500 block mb-1">Max Output Tokens</label>
-                                        <input type="number" value={modelConfig.maxOutputTokens} onChange={(e) => setModelConfig({...modelConfig, maxOutputTokens: parseInt(e.target.value)})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500" />
-                                    </div>
-                                    <div className="flex flex-col justify-end">
-                                        <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800">
-                                            <div className="flex-1">
-                                                <div className="text-xs font-semibold">Simulation Mode</div>
-                                                <div className="text-[10px] text-zinc-500">Mock API calls</div>
-                                            </div>
-                                            <button onClick={() => setModelConfig({...modelConfig, useSimulation: !modelConfig.useSimulation})} className={`w-9 h-5 rounded-full transition-colors relative ${modelConfig.useSimulation ? 'bg-purple-600' : 'bg-zinc-300 dark:bg-zinc-600'}`}>
-                                                <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${modelConfig.useSimulation ? 'left-4.5' : 'left-0.5'}`} />
-                                            </button>
+                                    
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs text-zinc-500 block mb-1 flex items-center gap-1 relative group w-fit">
+                                                Max Output Tokens
+                                                <HelpCircle className="w-3 h-3 text-zinc-400 cursor-help" />
+                                                <InfoTooltip text="The maximum number of tokens the model can generate in a single response. Higher values are safer for large batches of subtitles to prevent cutoff." />
+                                            </label>
+                                            <input type="number" value={modelConfig.maxOutputTokens} onChange={(e) => setModelConfig({...modelConfig, maxOutputTokens: parseInt(e.target.value)})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500" />
                                         </div>
                                     </div>
                                 </div>
-                             </div>
+                             )}
+                             
+                             <div className="flex flex-col justify-end pt-2">
+                                <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                                    <div className="flex-1">
+                                        <div className="text-xs font-semibold">Simulation Mode</div>
+                                        <div className="text-[10px] text-zinc-500">Mock API calls (Free)</div>
+                                    </div>
+                                    <button onClick={() => setModelConfig({...modelConfig, useSimulation: !modelConfig.useSimulation})} className={`w-9 h-5 rounded-full transition-colors relative ${modelConfig.useSimulation ? 'bg-purple-600' : 'bg-zinc-300 dark:bg-zinc-600'}`}>
+                                        <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${modelConfig.useSimulation ? 'left-4.5' : 'left-0.5'}`} />
+                                    </button>
+                                </div>
+                            </div>
 
                         </div>
                         <button onClick={() => setShowModelSettings(false)} className="w-full py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors">Apply Settings</button>
@@ -1209,6 +1460,14 @@ function App() {
             )}
       </main>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <ToastProvider>
+      <DualSubApp />
+    </ToastProvider>
   );
 }
 
