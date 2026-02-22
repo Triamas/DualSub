@@ -407,12 +407,12 @@ export const translateBatch = async (
       maxOutputTokens: 8192,
       useSimulation: false
   },
-  durations: Map<number, number> = new Map(),
+  _durations: Map<number, number> = new Map(),
   showBible: string = "",
   onLog?: (message: string, type: 'info' | 'request' | 'response' | 'error', data?: any) => void
 ): Promise<Map<number, string>> => {
 
-  const performTranslation = async (linesToProcess: SubtitleLine[], isRetry: boolean): Promise<Map<number, string>> => {
+  const performTranslation = async (linesToProcess: SubtitleLine[], _isRetry: boolean): Promise<Map<number, string>> => {
       
       // --- GOOGLE NMT PATH ---
       if (modelConfig.provider === 'google_nmt') {

@@ -9,7 +9,7 @@ const SESSION_KEY = 'batchItems';
 
 const initDB = async () => {
   return openDB(DB_NAME, 2, { // Version bumped to 2
-    upgrade(db, oldVersion, newVersion, transaction) {
+    upgrade(db, _oldVersion, _newVersion, _transaction) {
       if (!db.objectStoreNames.contains(SESSION_STORE)) {
         db.createObjectStore(SESSION_STORE);
       }

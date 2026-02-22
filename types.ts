@@ -92,6 +92,8 @@ export interface AssStyleConfig {
     borderStyle: 1 | 3; // 1=Outline+Shadow, 3=Opaque Box
     fontFamily: string;
     linesPerSubtitle?: 1 | 2; // 1 = Single Line (Squash), 2 = Standard (Max 2 lines)
+    screenPadding?: number; // Distance from bottom of screen (default 50)
+    verticalGap?: number; // Gap between subtitle blocks (default 15)
 }
 
 export interface ModelConfig {

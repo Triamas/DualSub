@@ -265,6 +265,13 @@ export const mergeAndOptimizeSubtitles = (
     enableSmartTiming: boolean
 ): SubtitleLine[] => {
     
+    if (!sourceSubtitles || sourceSubtitles.length === 0) {
+        throw new Error("Source subtitles are empty. Cannot merge.");
+    }
+    if (!importedSubtitles || importedSubtitles.length === 0) {
+        throw new Error("Imported translation file is empty or invalid. Cannot merge.");
+    }
+
     // Pre-calculate timestamps for performance
     const sTimes = sourceSubtitles.map(s => ({ start: parseTimeMs(s.startTime), end: parseTimeMs(s.endTime) }));
     const iTimes = importedSubtitles.map(s => ({ start: parseTimeMs(s.startTime), end: parseTimeMs(s.endTime) }));
@@ -606,33 +613,20 @@ const renderASS = (optimizedSubtitles: SubtitleLine[], config: AssStyleConfig): 
   
   const effectiveOutlineColor = borderStyle === 3 ? boxColorAss : standardOutlineColor;
   
+  // Default values if not provided
+  const screenPadding = config.screenPadding ?? 50;
+  const verticalGap = config.verticalGap ?? 15;
+  
+  // Base margins for Styles (used as fallback or for Split layout)
   let primMarginV = 60; 
   let secMarginV = 60;
   
   if (config.layout === 'stacked') {
-      const bottomBaseMargin = 50; 
-      const gap = 15; 
-      const lineMultiplier = config.linesPerSubtitle || 2; 
-      const lineHeightFactor = 1.25;
-
-      if (config.stackOrder === 'secondary-top') {
-          // Primary is at the bottom (Baseline at bottomBaseMargin)
-          primMarginV = bottomBaseMargin;
-          
-          // Secondary is on top. It must be shifted up by the height of Primary + Gap.
-          // Primary Block Height = Size * Lines * LineHeightFactor
-          const primaryBlockHeight = primSize * lineMultiplier * lineHeightFactor;
-          
-          secMarginV = Math.round(bottomBaseMargin + primaryBlockHeight + gap);
-      } else {
-          // Secondary is at the bottom (Baseline at bottomBaseMargin)
-          secMarginV = bottomBaseMargin;
-          
-          // Primary is on top. Shifted up by Secondary Height + Gap.
-          const secondaryBlockHeight = secSize * lineMultiplier * lineHeightFactor;
-          
-          primMarginV = Math.round(bottomBaseMargin + secondaryBlockHeight + gap);
-      }
+      // In Stacked mode with dynamic positioning, we set the Style margins to 0 or minimal
+      // because we will use \pos(x,y) to override them.
+      // However, to be safe, we set them to the screenPadding so if \pos fails (unlikely), they anchor to bottom.
+      primMarginV = screenPadding;
+      secMarginV = screenPadding;
   } else {
       // Split mode or other layouts
       if (config.stackOrder === 'primary-top') {
@@ -664,8 +658,8 @@ const renderASS = (optimizedSubtitles: SubtitleLine[], config: AssStyleConfig): 
   let styleSecondary = '';
 
   if (config.layout === 'stacked') {
-      // In ASS Alignment=2 (Bottom Center), marginV is the distance from the bottom edge.
-      // Both are effectively anchored to bottom, but with different margins to stack them.
+      // In ASS Alignment=2 (Bottom Center).
+      // We use the same base margin for both styles because we will use \pos to stack them dynamically.
       stylePrimary = buildStyle('Primary', primSize, primaryColorAss, 2, primMarginV);
       styleSecondary = buildStyle('Secondary', secSize, secondaryColorAss, 2, secMarginV);
   } else {
@@ -724,8 +718,49 @@ Comment: 0,0:00:00.00,0:00:00.00,Primary,,0,0,0,,metadata: DualSub AI Generation
 
     if (!translated && !original) return '';
 
-    const eventPrimary = translated ? `Dialogue: 0,${start},${end},Primary,,0,0,0,,${translated}` : '';
-    const eventSecondary = original ? `Dialogue: 0,${start},${end},Secondary,,0,0,0,,${original}` : '';
+    // Dynamic Positioning Logic for Stacked Layout
+    let posPrimary = '';
+    let posSecondary = '';
+
+    if (config.layout === 'stacked') {
+        const PLAY_RES_X = 3840;
+        const PLAY_RES_Y = 2160;
+        const CENTER_X = PLAY_RES_X / 2;
+        
+        // Calculate line counts (approximate based on \N)
+        const countLines = (txt: string) => (txt.match(/\\N/g) || []).length + 1;
+        
+        const primLines = translated ? countLines(translated) : 0;
+        const secLines = original ? countLines(original) : 0;
+        
+        // Estimate Heights (FontSize * Lines * Leading)
+        // Leading factor 1.25 is standard for ASS
+        const primHeight = primLines * primSize * 1.25;
+        const secHeight = secLines * secSize * 1.25;
+        
+        const bottomY = PLAY_RES_Y - screenPadding;
+        
+        if (config.stackOrder === 'secondary-top') {
+            // Primary is Bottom
+            // \pos specifies the anchor point. For Alignment 2, it's Bottom Center.
+            posPrimary = `\\pos(${CENTER_X},${bottomY})`;
+            
+            // Secondary is Top
+            // Anchor Y = BottomY - PrimaryHeight - Gap
+            const topY = bottomY - primHeight - verticalGap;
+            posSecondary = `\\pos(${CENTER_X},${topY})`;
+        } else {
+            // Secondary is Bottom
+            posSecondary = `\\pos(${CENTER_X},${bottomY})`;
+            
+            // Primary is Top
+            const topY = bottomY - secHeight - verticalGap;
+            posPrimary = `\\pos(${CENTER_X},${topY})`;
+        }
+    }
+
+    const eventPrimary = translated ? `Dialogue: 0,${start},${end},Primary,,0,0,0,,${posPrimary}${translated}` : '';
+    const eventSecondary = original ? `Dialogue: 0,${start},${end},Secondary,,0,0,0,,${posSecondary}${original}` : '';
 
     return `${eventPrimary}\n${eventSecondary}`;
   }).join('\n');

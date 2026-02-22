@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { Search, Download, AlertCircle, Key, ExternalLink, Globe, Film, Clapperboard, Layers, LogOut, Clock, X } from 'lucide-react';
+import { Search, Download, AlertCircle, Key, ExternalLink, Globe, Film, Layers, LogOut, X } from 'lucide-react';
 import { UnifiedSubtitle } from '../types';
 import JSZip from 'jszip';
 
@@ -364,8 +365,10 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
       <div className="bg-zinc-100 dark:bg-zinc-800 p-4 rounded-lg border border-zinc-200 dark:border-zinc-700 space-y-4 transition-colors duration-300">
         
         {/* Provider Tabs */}
-        <div className="flex gap-4 border-b border-zinc-200 dark:border-zinc-700 pb-2">
+        <div role="tablist" className="flex gap-4 border-b border-zinc-200 dark:border-zinc-700 pb-2">
             <button 
+                role="tab"
+                aria-selected={provider === 'OpenSubtitles'}
                 onClick={() => { setProvider('OpenSubtitles'); setResults([]); }}
                 className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'OpenSubtitles' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
                 title="Search using OpenSubtitles.com API"
@@ -373,6 +376,8 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                 <Layers className="w-4 h-4" /> OpenSubtitles
             </button>
             <button 
+                role="tab"
+                aria-selected={provider === 'Subdl'}
                 onClick={() => { setProvider('Subdl'); setResults([]); }}
                 className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'Subdl' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
                 title="Search using Subdl.com API"
@@ -380,6 +385,8 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                 <Layers className="w-4 h-4" /> Subdl
             </button>
             <button 
+                role="tab"
+                aria-selected={provider === 'External'}
                 onClick={() => { setProvider('External'); setResults([]); setError(''); }}
                 className={`flex items-center gap-2 px-3 py-1 rounded transition-colors ${provider === 'External' ? 'bg-yellow-500 text-black font-semibold' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
                 title="Get links to external subtitle websites"
@@ -399,6 +406,7 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                                 Get one from <a href="https://www.opensubtitles.com/en/consumers" target="_blank" className="text-yellow-600 dark:text-yellow-400 hover:underline">opensubtitles.com</a>.
                             </p>
                             <input
+                                aria-label="OpenSubtitles API Key"
                                 type="password"
                                 placeholder="Enter OpenSubtitles Key"
                                 value={osApiKey}
@@ -414,6 +422,7 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
                                 Get one from <a href="https://subdl.com/panel/api" target="_blank" className="text-yellow-600 dark:text-yellow-400 hover:underline">subdl.com/panel/api</a>.
                             </p>
                             <input
+                                aria-label="Subdl API Key"
                                 type="password"
                                 placeholder="Enter Subdl API Key"
                                 value={subdlApiKey}
@@ -443,151 +452,161 @@ const SubtitleSearch: React.FC<SubtitleSearchProps> = ({ onSelectSubtitle }) => 
 
       {/* Search Controls */}
       <div className="space-y-4">
-          <div className="flex gap-2 p-1 bg-zinc-200 dark:bg-zinc-800 rounded-lg w-fit transition-colors">
-              <button onClick={() => setSearchMode('query')} title="Search by movie or show title" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'query' ? 'bg-yellow-500 text-black' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}>
-                  <Search className="w-4 h-4" /> Text
-              </button>
-              <button onClick={() => setSearchMode('imdb')} title="Search by IMDB ID (e.g. tt1234567)" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'imdb' ? 'bg-yellow-500 text-black' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}>
-                  <Clapperboard className="w-4 h-4" /> IMDB
-              </button>
-              <button onClick={() => setSearchMode('tmdb')} title="Search by TMDB ID" className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 ${searchMode === 'tmdb' ? 'bg-yellow-500 text-black' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}>
-                  <Film className="w-4 h-4" /> TMDB
-              </button>
+          <div className="flex gap-2 p-1 bg-zinc-200 dark:bg-zinc-800 rounded-lg w-fit">
+               <button onClick={() => setSearchMode('query')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${searchMode === 'query' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Text</button>
+               <button onClick={() => setSearchMode('imdb')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${searchMode === 'imdb' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>IMDb ID</button>
+               <button onClick={() => setSearchMode('tmdb')} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${searchMode === 'tmdb' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>TMDB ID</button>
           </div>
 
-          <form onSubmit={handleSearch} className="flex flex-col gap-3">
-            <div className="flex gap-2">
-                <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder={
-                        searchMode === 'imdb' ? "tt1375666" :
-                        searchMode === 'tmdb' ? "27205" :
-                        "Search movie/show..."
-                    }
-                    title="Enter search terms"
-                    className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg px-4 py-3 text-zinc-900 dark:text-zinc-100 focus:border-yellow-500 focus:outline-none transition-colors"
-                />
-                
-                <div className="flex gap-2">
-                    <input type="number" min="1" value={season} onChange={(e) => setSeason(e.target.value)} placeholder="S" className="w-16 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg text-center text-zinc-900 dark:text-zinc-100 focus:border-yellow-500 focus:outline-none transition-colors" title="Season number (optional)" />
-                    <input type="number" min="1" value={episode} onChange={(e) => setEpisode(e.target.value)} placeholder="E" className="w-16 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg text-center text-zinc-900 dark:text-zinc-100 focus:border-yellow-500 focus:outline-none transition-colors" title="Episode number (optional)" />
-                </div>
-
-                {provider !== 'External' && (
-                    <button
-                        type="submit"
-                        disabled={loading || !getApiKey()}
-                        title="Search for subtitles"
-                        className="bg-yellow-500 text-black font-semibold px-6 py-3 rounded-lg hover:bg-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                        {loading ? '...' : <Search className="w-5 h-5" />}
-                    </button>
-                )}
-            </div>
-            
-            {/* Search History Tag Cloud */}
-            {history.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="text-zinc-500 dark:text-zinc-500 text-xs flex items-center gap-1"><Clock className="w-3 h-3"/> Recent:</span>
-                    {history.map((histItem, idx) => (
-                        <div 
-                            key={idx}
-                            onClick={() => {
-                                setQuery(histItem);
-                            }}
-                            title="Click to search again"
-                            className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 hover:border-yellow-500/50 hover:text-zinc-900 dark:hover:text-white cursor-pointer flex items-center gap-1 group transition-colors"
-                        >
-                            <span>{histItem}</span>
-                            <span 
-                                onClick={(e) => removeFromHistory(e, histItem)}
-                                className="text-zinc-400 dark:text-zinc-500 hover:text-red-500 dark:hover:text-red-400 p-0.5 rounded-full"
-                                title="Remove from history"
-                            >
-                                <X className="w-3 h-3" />
-                            </span>
-                        </div>
-                    ))}
-                </div>
-            )}
+          <form onSubmit={handleSearch} className="flex gap-2">
+              <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                  <input 
+                      autoFocus
+                      type="text" 
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder={searchMode === 'query' ? "Search movie or TV show..." : searchMode === 'imdb' ? "tt1234567" : "12345"}
+                      className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 focus:outline-none focus:border-yellow-500 transition-colors"
+                  />
+                  {history.length > 0 && !query && (
+                      <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl z-50 overflow-hidden">
+                          <div className="px-3 py-2 text-[10px] font-bold text-zinc-400 uppercase tracking-wider bg-zinc-50 dark:bg-zinc-900/50">Recent Searches</div>
+                          {history.map(h => (
+                              <div key={h} onClick={() => { setQuery(h); handleSearch(); }} className="px-4 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer flex justify-between group">
+                                  <span>{h}</span>
+                                  <X onClick={(e) => removeFromHistory(e, h)} className="w-4 h-4 text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </div>
+                          ))}
+                      </div>
+                  )}
+              </div>
+              
+              {(searchMode !== 'imdb' && searchMode !== 'tmdb') && (
+                  <>
+                    <input 
+                        type="number" 
+                        placeholder="S" 
+                        value={season} 
+                        onChange={e => setSeason(e.target.value)}
+                        className="w-16 px-3 py-2.5 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 focus:outline-none focus:border-yellow-500 text-center"
+                        title="Season Number"
+                    />
+                    <input 
+                        type="number" 
+                        placeholder="E" 
+                        value={episode} 
+                        onChange={e => setEpisode(e.target.value)}
+                        className="w-16 px-3 py-2.5 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 focus:outline-none focus:border-yellow-500 text-center"
+                        title="Episode Number"
+                    />
+                  </>
+              )}
+              
+              <button 
+                type="submit" 
+                disabled={loading || !query}
+                className="px-6 py-2.5 bg-yellow-500 hover:bg-yellow-400 text-black font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                  {loading ? <span className="animate-spin">⌛</span> : <Search className="w-5 h-5" />}
+                  Search
+              </button>
           </form>
       </div>
-      
-      {/* External Links Grid */}
+
+      {/* External Links Generator */}
       {provider === 'External' && query && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-              {EXTERNAL_PROVIDERS.map((site) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 animate-in fade-in slide-in-from-bottom-2">
+              {EXTERNAL_PROVIDERS.map((prov) => (
                   <a 
-                    key={site.name}
-                    href={site.url(query)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="Open external site in new tab"
-                    className="bg-zinc-100 dark:bg-zinc-800 p-4 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:border-yellow-500 hover:bg-zinc-50 dark:hover:bg-zinc-750 transition-all group flex justify-between items-center"
+                    key={prov.name} 
+                    href={prov.url(query)} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="flex items-center gap-3 p-3 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:border-yellow-500 dark:hover:border-yellow-500 bg-white dark:bg-zinc-900/50 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all group"
                   >
-                      <div>
-                          <h4 className="font-semibold text-lg text-zinc-900 dark:text-zinc-100 group-hover:text-yellow-600 dark:group-hover:text-yellow-400 transition-colors">{site.name}</h4>
-                          <p className="text-sm text-zinc-500 dark:text-zinc-400">{site.desc}</p>
+                      <div className="bg-zinc-100 dark:bg-zinc-800 p-2 rounded-lg group-hover:text-yellow-500 transition-colors">
+                          <ExternalLink className="w-4 h-4" />
                       </div>
-                      <ExternalLink className="w-5 h-5 text-zinc-400 dark:text-zinc-500 group-hover:text-yellow-500" />
+                      <div>
+                          <div className="font-bold text-sm">{prov.name}</div>
+                          <div className="text-[10px] text-zinc-500">{prov.desc}</div>
+                      </div>
                   </a>
               ))}
           </div>
       )}
-      
-      {/* API Error & Fallback */}
-      {error && provider !== 'External' && (
-        <div className="bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-200 p-4 rounded-lg flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                <span>{error}</span>
-            </div>
-            {manualDownloadLink && (
-                <div className="ml-7 mt-1">
-                    <a href={manualDownloadLink.url} download className="text-yellow-600 dark:text-yellow-400 hover:underline font-medium inline-flex items-center gap-1">
-                        <Download className="w-4 h-4" /> Download manually
-                    </a>
-                </div>
-            )}
+
+      {/* Error Message */}
+      {error && (
+        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-600 dark:text-red-300 text-sm flex items-start gap-3">
+             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+             <div>{error}</div>
         </div>
       )}
 
-      {/* API Results List */}
-      {provider !== 'External' && (
-          <div className="space-y-3">
-            {results.map((item) => (
-            <div key={item.id} className="bg-white dark:bg-zinc-800/50 p-4 rounded-lg border border-zinc-200 dark:border-zinc-700 flex justify-between items-center hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
-                <div className="overflow-hidden pr-4">
-                <div className="flex items-center gap-2">
-                    <h4 className="font-medium text-lg text-zinc-900 dark:text-zinc-100 truncate">{item.title}</h4>
-                    <span className="text-xs bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 px-1.5 rounded">{item.provider}</span>
-                </div>
-                <div className="flex flex-wrap gap-4 text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                    <span className="bg-zinc-100 dark:bg-zinc-700/50 px-2 py-0.5 rounded text-xs border border-zinc-300 dark:border-zinc-600 uppercase">{item.format}</span>
-                    {item.downloadCount !== undefined && <span>DLs: {item.downloadCount}</span>}
-                    {item.score !== undefined && <span>Score: {item.score}</span>}
-                    {item.uploadDate && <span>{new Date(item.uploadDate).toLocaleDateString()}</span>}
-                    {item.hearingImpaired && <span className="text-yellow-600 dark:text-yellow-500/80" title="Hearing Impaired">HI</span>}
-                </div>
-                </div>
-                <button
-                    onClick={() => handleDownload(item)}
-                    disabled={!!downloading}
-                    title="Download and import this subtitle"
-                    className="bg-zinc-200 dark:bg-zinc-700 hover:bg-zinc-300 dark:hover:bg-zinc-600 text-zinc-900 dark:text-white px-4 py-2 rounded flex-shrink-0 flex items-center gap-2 transition-colors min-w-[100px] justify-center"
-                >
-                    {downloading === item.id ? 'Loading...' : <><Download className="w-4 h-4" /> Get</>}
-                </button>
-            </div>
-            ))}
-            {results.length === 0 && !loading && query && !error && (
-                <div className="text-center py-8 space-y-2">
-                    <p className="text-zinc-500">No results found on {provider}.</p>
-                </div>
-            )}
-        </div>
+      {/* Manual Download Link Fallback */}
+      {manualDownloadLink && (
+          <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-800 dark:text-blue-200 text-sm flex flex-col gap-2">
+              <div className="flex items-center gap-2 font-bold">
+                  <AlertCircle className="w-4 h-4" />
+                  <span>Automatic Download Blocked</span>
+              </div>
+              <p>The browser blocked the file download or the API response format was unexpected (CORS/Zip). Please download manually:</p>
+              <a href={manualDownloadLink.url} download={manualDownloadLink.name} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline break-all font-mono">
+                  {manualDownloadLink.url}
+              </a>
+          </div>
+      )}
+
+      {/* Results List */}
+      {results.length > 0 && (
+          <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden bg-white dark:bg-zinc-900">
+              <div className="grid grid-cols-[1fr_80px_100px_100px] gap-4 p-3 bg-zinc-50 dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                  <div>Release Name</div>
+                  <div className="text-center">Lang</div>
+                  <div className="text-center">Format</div>
+                  <div className="text-right">Action</div>
+              </div>
+              <div className="divide-y divide-zinc-100 dark:divide-zinc-800 max-h-[400px] overflow-y-auto">
+                  {results.map((item) => (
+                      <div key={item.id} className="grid grid-cols-[1fr_80px_100px_100px] gap-4 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors items-center">
+                          <div className="min-w-0">
+                              <div className="font-medium text-sm truncate" title={item.title}>{item.title}</div>
+                              <div className="flex gap-2 text-[10px] text-zinc-500 mt-1">
+                                  {item.uploadDate && <span>{item.uploadDate.split('T')[0]}</span>}
+                                  {item.downloadCount !== undefined && <span>• {item.downloadCount} DLs</span>}
+                                  {item.hearingImpaired && <span className="text-yellow-600 dark:text-yellow-500 font-bold">• HI</span>}
+                                  {item.score !== undefined && <span>• ⭐ {item.score}</span>}
+                              </div>
+                          </div>
+                          <div className="text-center">
+                              <span className="px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 text-xs font-mono">{item.language}</span>
+                          </div>
+                          <div className="text-center">
+                              <span className="px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 text-xs font-mono uppercase">{item.format}</span>
+                          </div>
+                          <div className="text-right">
+                              <button 
+                                onClick={() => handleDownload(item)} 
+                                disabled={!!downloading}
+                                className="px-3 py-1.5 bg-zinc-900 dark:bg-white text-white dark:text-black rounded-lg text-xs font-bold hover:opacity-80 disabled:opacity-50 transition-opacity flex items-center gap-1 ml-auto"
+                              >
+                                  {downloading === item.id ? <span className="animate-spin">⌛</span> : <Download className="w-3.5 h-3.5" />}
+                                  {downloading === item.id ? '...' : 'Get'}
+                              </button>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
+      
+      {!loading && results.length === 0 && query && provider !== 'External' && (
+          <div className="text-center py-12 text-zinc-400">
+              <Film className="w-12 h-12 mx-auto mb-3 opacity-20" />
+              <p>No subtitles found for "{query}".</p>
+          </div>
       )}
     </div>
   );
