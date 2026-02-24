@@ -1,5 +1,5 @@
 
-import { openDB } from 'idb';
+import { openDB, DBSchema } from 'idb';
 import { BatchItem } from '../types';
 
 const DB_NAME = 'DualSubAI';
@@ -7,9 +7,28 @@ const SESSION_STORE = 'session';
 const METADATA_STORE = 'show_metadata'; // New Store
 const SESSION_KEY = 'batchItems';
 
+export interface ShowMetadata {
+    showName: string;
+    displayTitle?: string;
+    context: string;
+    bible: string;
+    timestamp: number;
+}
+
+interface DualSubDB extends DBSchema {
+  [SESSION_STORE]: {
+    key: string;
+    value: Omit<BatchItem, 'originalFile'>[];
+  };
+  [METADATA_STORE]: {
+    key: string;
+    value: ShowMetadata;
+  };
+}
+
 const initDB = async () => {
-  return openDB(DB_NAME, 2, { // Version bumped to 2
-    upgrade(db, _oldVersion, _newVersion, _transaction) {
+  return openDB<DualSubDB>(DB_NAME, 2, { // Version bumped to 2
+    upgrade(db) {
       if (!db.objectStoreNames.contains(SESSION_STORE)) {
         db.createObjectStore(SESSION_STORE);
       }
@@ -24,6 +43,7 @@ export const saveSession = async (items: BatchItem[]) => {
   try {
     const db = await initDB();
     const serializableItems = items.map(item => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { originalFile, ...rest } = item; 
         return rest;
     });
@@ -37,7 +57,7 @@ export const loadSession = async (): Promise<BatchItem[]> => {
   try {
     const db = await initDB();
     const items = await db.get(SESSION_STORE, SESSION_KEY);
-    return items || [];
+    return (items || []) as BatchItem[]; // Cast back to BatchItem[] (originalFile will be undefined)
   } catch (error) {
     console.warn("Failed to load session from IndexedDB:", error);
     return [];
@@ -52,13 +72,6 @@ export const clearSession = async () => {
         console.error(e);
     }
 };
-
-export interface ShowMetadata {
-    showName: string;
-    context: string;
-    bible: string;
-    timestamp: number;
-}
 
 export const saveShowMetadata = async (showName: string, data: { context: string, bible: string }) => {
     try {
@@ -76,13 +89,13 @@ export const saveShowMetadata = async (showName: string, data: { context: string
     }
 };
 
-export const loadShowMetadata = async (showName: string): Promise<ShowMetadata | null> => {
+export const loadShowMetadata = async (showName: string): Promise<ShowMetadata | undefined> => {
     try {
         const db = await initDB();
         const key = showName.toLowerCase().trim();
         return await db.get(METADATA_STORE, key);
     } catch (error) {
         console.warn("Failed to load show metadata:", error);
-        return null;
+        return undefined;
     }
 };

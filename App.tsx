@@ -1,305 +1,64 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, FileText, RefreshCw, Download as DownloadIcon, Sparkles, Languages, Settings2, Layout, Palette, Trash2, Type, Cog, X, Cpu, ScrollText, FileInput, Coins, HelpCircle, Globe, Moon, Sun, BookOpen, Hourglass, ArrowUp, ArrowDown, Eye } from 'lucide-react';
-import { SubtitleLine, TabView, AssStyleConfig, BatchItem, ModelConfig, LogEntry } from './types';
-import { parseSubtitle, generateSubtitleContent, downloadFile, STYLE_PRESETS, calculateSafeDurations, mergeAndOptimizeSubtitles, estimateTokens } from './services/subtitleUtils';
-import { translateBatch, generateContext, detectLanguage, generateShowBible, identifyShowName } from './services/geminiService';
-import { saveSession, loadSession, clearSession, loadShowMetadata, saveShowMetadata } from './services/storage';
+import { Upload, Eye, Sparkles, Languages, BookOpen, Hourglass, Download as DownloadIcon, Cpu, Type, ScrollText, Coins, FileInput, RefreshCw } from 'lucide-react';
+import { TabView, ModelConfig } from './types';
+import { STYLE_PRESETS } from './services/subtitleUtils';
 import SubtitleSearch from './components/OpenSubtitlesSearch';
 import { ToastProvider, useToast } from './components/Toast';
+import { Header } from './components/Header';
+import { BatchQueue } from './components/BatchQueue';
+import { StyleEditor } from './components/StyleEditor';
+import { ModelSettings } from './components/ModelSettings';
+import { SubtitleEditor } from './components/SubtitleEditor';
+import { InfoTooltip } from './components/InfoTooltip';
+import { AVAILABLE_LANGUAGES, OPENAI_PRESETS } from './constants';
+import { BatchProvider, useBatch } from './contexts/BatchContext';
+import { SettingsProvider, useSettings } from './contexts/SettingsContext';
+import { useCostEstimator } from './hooks/useCostEstimator';
+import { useSubtitleFile } from './hooks/useSubtitleFile';
+import { useTranslationEngine } from './hooks/useTranslationEngine';
 
-// OPTIMIZED CONSTANTS FOR STABILITY
-const BATCH_SIZE = 40;  
-const CONCURRENCY = 8;  
-const OVERLAP_SIZE = 5; 
+// --- MAIN APP CONTENT ---
 
-const AVAILABLE_LANGUAGES = [
-    "Arabic", "Bulgarian", "Chinese (Simplified)", "Chinese (Traditional)", "Croatian", "Czech", 
-    "Danish", "Dutch", "Estonian", "Finnish", "French", "German", "Greek", "Hindi", "Hungarian", 
-    "Indonesian", "Irish", "Italian", "Japanese", "Korean", "Latvian", "Lithuanian", "Maltese", 
-    "Polish", "Portuguese", "Romanian", "Slovak", "Slovenian", "Spanish", "Swedish", "Thai", 
-    "Turkish", "Ukrainian", "Vietnamese"
-];
+function DualSubAppContent() {
+  const { state: batchState, dispatch: batchDispatch } = useBatch();
+  const { batchItems, activeItemId } = batchState;
 
-const AVAILABLE_MODELS = [
-    { id: 'gemini-3-flash-preview', name: 'Gemini 3.0 Flash (Recommended)' },
-    { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro (High Intelligence)' },
-    { id: 'gemini-flash-lite-latest', name: 'Gemini 2.5 Flash Lite (Fastest)' }
-];
+  const {
+      theme, setTheme,
+      targetLang, setTargetLang,
+      autoContext, setAutoContext,
+      autoBible, setAutoBible,
+      smartTiming, setSmartTiming,
+      modelConfig, setModelConfig,
+      styleConfig, setStyleConfig,
+      customModelMode, setCustomModelMode
+  } = useSettings();
 
-const OPENAI_PRESETS = [
-    { label: "OpenAI", options: [
-        { id: "gpt-4o", name: "GPT-4o" },
-        { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
-        { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" }
-    ]},
-    { label: "DeepSeek", options: [
-        { id: "deepseek-chat", name: "DeepSeek Chat (V3)" },
-        { id: "deepseek-reasoner", name: "DeepSeek Reasoner (R1)" }
-    ]},
-    { label: "Mistral", options: [
-        { id: "mistral-large-latest", name: "Mistral Large" },
-        { id: "mistral-small-latest", name: "Mistral Small" }
-    ]},
-    { label: "Groq (Llama)", options: [
-        { id: "llama3-70b-8192", name: "Llama 3 70B" },
-        { id: "llama3-8b-8192", name: "Llama 3 8B" }
-    ]},
-    { label: "Anthropic (via Proxy)", options: [
-        { id: "claude-3-opus-20240229", name: "Claude 3 Opus" },
-        { id: "claude-3-5-sonnet-20240620", name: "Claude 3.5 Sonnet" }
-    ]}
-];
-
-const KODI_FONTS = [
-    "Arial", "Arial Narrow", "Arial Black", "Comic Sans MS", "Courier New", 
-    "DejaVu Sans", "Georgia", "Impact", "Times New Roman", "Trebuchet MS", "Verdana", "Teletext"
-];
-
-// --- COMPONENTS ---
-
-const InfoTooltip = ({ text }: { text: string }) => (
-    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2.5 bg-zinc-900 dark:bg-zinc-800 text-white text-xs leading-relaxed rounded-lg shadow-xl border border-zinc-700/50 hidden group-hover:block z-[100] pointer-events-none animate-in fade-in slide-in-from-bottom-1 duration-200" role="tooltip">
-        {text}
-        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-900 dark:border-t-zinc-800"></div>
-    </div>
-);
-
-const VisualPreview = ({ 
-    config, 
-    original, 
-    translated,
-    isSample = false
-}: { 
-    config: AssStyleConfig, 
-    original: string, 
-    translated: string,
-    isSample?: boolean
-}) => {
-    
-    // Green Screen Background for Contrast Check
-    const containerStyle: React.CSSProperties = {
-        aspectRatio: '16/9',
-        backgroundColor: '#166534', 
-        backgroundImage: 'radial-gradient(circle at center, #4ade80 0%, #14532d 100%)',
-        position: 'relative',
-        overflow: 'hidden',
-        borderRadius: '0.75rem',
-        border: '1px solid #3f3f46',
-        display: 'flex',
-        flexDirection: 'column',
-        boxShadow: '0 20px 50px -12px rgba(0, 0, 0, 0.5)'
-    };
-
-    // Reduced scale to simulate 4K TV resolution proportions on small preview
-    const SCALE = 0.25; 
-    
-    const displayOriginal = original || "Original Text Placeholder";
-    const displayTranslated = translated || "Translated Text Placeholder";
-
-    if (config.outputFormat === 'srt') {
-        return (
-            <div style={containerStyle} className="group" aria-label="Subtitle Preview">
-                 <div className="absolute inset-0 pointer-events-none opacity-20" 
-                      style={{backgroundImage: 'linear-gradient(#333 1px, transparent 1px), linear-gradient(90deg, #333 1px, transparent 1px)', backgroundSize: '40px 40px'}}>
-                 </div>
-                 {isSample && <div className="absolute top-2 right-2 px-2 py-1 bg-zinc-800/80 rounded text-xs text-zinc-400 font-mono">SRT PREVIEW</div>}
-                
-                <div style={{position: 'absolute', bottom: '10%', left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', padding: '0 2rem', zIndex: 10, textAlign: 'center', gap: '8px'}}>
-                    {config.stackOrder === 'primary-top' ? (
-                        <>
-                             <div style={{color: config.primary.color, fontSize: '18px', fontWeight: 'bold', textShadow: '2px 2px 0 #000'}}>{displayTranslated}</div>
-                             <div style={{color: config.secondary.color, fontSize: '18px', fontWeight: 'bold', textShadow: '2px 2px 0 #000'}}>{displayOriginal}</div>
-                        </>
-                    ) : (
-                        <>
-                             <div style={{color: config.secondary.color, fontSize: '18px', fontWeight: 'bold', textShadow: '2px 2px 0 #000'}}>{displayOriginal}</div>
-                             <div style={{color: config.primary.color, fontSize: '18px', fontWeight: 'bold', textShadow: '2px 2px 0 #000'}}>{displayTranslated}</div>
-                        </>
-                    )}
-                </div>
-            </div>
-        );
-    }
-
-    const getTextStyle = (isPrimary: boolean) => {
-        const style = isPrimary ? config.primary : config.secondary;
-        const color = style.color;
-        const size = style.fontSize * SCALE;
-        const outlineW = config.outlineWidth; 
-        const shadowD = config.shadowDepth; 
-        const shadowColor = 'rgba(0,0,0,0.8)';
-        
-        let textShadows = [];
-        if (outlineW > 0) {
-            const stroke = Math.max(1, outlineW * 0.8); 
-            for(let x = -1; x <= 1; x++) {
-                for(let y = -1; y <= 1; y++) {
-                    if(x!==0 || y!==0) textShadows.push(`${x*stroke}px ${y*stroke}px 0 #000`);
-                }
-            }
-        }
-        if (shadowD > 0) {
-             textShadows.push(`${shadowD * 1.5}px ${shadowD * 1.5}px 2px ${shadowColor}`);
-        }
-        
-        return {
-            fontFamily: config.fontFamily,
-            fontSize: `${size}px`,
-            color: color,
-            textShadow: textShadows.length ? textShadows.join(',') : 'none',
-            textAlign: 'center' as const,
-            fontWeight: 600,
-            lineHeight: 1.25,
-            margin: '4px 0',
-            backgroundColor: config.borderStyle === 3 ? 'rgba(0,0,0,0.65)' : 'transparent',
-            padding: config.borderStyle === 3 ? '2px 8px' : '0px',
-            borderRadius: config.borderStyle === 3 ? '4px' : '0px',
-            whiteSpace: 'pre-wrap' as const, 
-            position: 'relative' as const,
-            zIndex: 20
-        };
-    };
-
-    const formatHtml = (text: string) => {
-        if (!text) return { __html: "&nbsp;" };
-        
-        // Normalize HTML breaks to [br] first
-        let content = text.replace(/<br\s*\/?>/gi, '[br]').replace(/<\/br>/gi, '[br]');
-        
-        if (config.linesPerSubtitle === 1) {
-            content = content.replace(/\[br\]/g, ' ');
-        } else {
-            content = content.replace(/\[br\]/g, '<br/>');
-        }
-        return { __html: content };
-    };
-
-    const renderText = (isPrimary: boolean, text: string) => {
-        const style = getTextStyle(isPrimary);
-        const html = formatHtml(text);
-        return (
-            <div 
-                style={style} 
-                dangerouslySetInnerHTML={html} 
-            />
-        );
-    };
-
-    const PrimaryText = renderText(true, displayTranslated);
-    const SecondaryText = renderText(false, displayOriginal);
-
-    // Default values
-    const screenPadding = config.screenPadding ?? 50;
-    const verticalGap = config.verticalGap ?? 15;
-    
-    // Scale down padding/gap for preview (assuming preview height ~200px vs 2160px real)
-    // 2160px -> 100% height. Preview is aspect ratio 16/9.
-    // Let's use % for bottom position to be responsive.
-    // 50px / 2160px = 2.3%
-    // const scaleY = (px: number) => `${(px / 21.6)}%`; 
-
-    let content;
-    if (config.layout === 'split') {
-        const MARGIN_V = '8%';
-        // ... (Split logic remains same or can be updated if needed, but user focused on Stacked)
-        // For split, we can just stick to top/bottom 8%
-        content = (
-            <>
-                <div style={{position: 'absolute', top: MARGIN_V, left: 0, right: 0, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '0 2rem', zIndex: 10}}>
-                    {config.stackOrder === 'primary-top' ? PrimaryText : SecondaryText}
-                </div>
-                <div style={{position: 'absolute', bottom: MARGIN_V, left: 0, right: 0, display: 'flex', justifyContent: 'center', alignItems: 'flex-end', padding: '0 2rem', zIndex: 10}}>
-                    {config.stackOrder === 'primary-top' ? SecondaryText : PrimaryText}
-                </div>
-            </>
-        );
-    } else {
-        // Stacked - Dynamic Positioning
-        const bottomElem = config.stackOrder === 'primary-top' ? SecondaryText : PrimaryText;
-        const topElem = config.stackOrder === 'primary-top' ? PrimaryText : SecondaryText;
-        
-        // In CSS, we can stack them using flex-col-reverse or just flex-col justify-end
-        // But to match ASS "gap", we need to be careful.
-        // Flex gap matches ASS gap if we set it right.
-        
-        // We need to scale the gap. 
-        // Real gap is verticalGap (px in 2160p).
-        // Preview gap should be proportional.
-        const gapStyle = `${verticalGap * SCALE}px`;
-        const bottomStyle = `${screenPadding * SCALE}px`;
-
-        content = (
-            <div style={{
-                position: 'absolute', 
-                bottom: bottomStyle, 
-                left: 0, 
-                right: 0, 
-                display: 'flex', 
-                flexDirection: 'column', // Stack top-to-bottom
-                alignItems: 'center', 
-                justifyContent: 'flex-end', // Pack at the bottom
-                padding: '0 2rem', 
-                zIndex: 10,
-                gap: gapStyle
-            }}>
-                {topElem}
-                {bottomElem}
-            </div>
-        );
-    }
-
-    return (
-        <div style={containerStyle} className="group transition-all duration-300" aria-label="Subtitle Preview">
-             <div className="absolute inset-0 pointer-events-none opacity-5 z-0" 
-                  style={{background: 'linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2))', backgroundSize: '100% 4px'}}>
-             </div>
-             {isSample && <div className="absolute top-2 right-2 px-2 py-1 bg-zinc-800/80 rounded text-xs text-zinc-400 font-mono z-30 backdrop-blur-sm">ASS PREVIEW</div>}
-             {content}
-        </div>
-    );
-};
-
-// --- MAIN APP CONTENT (Refactored to support ToastProvider wrapper) ---
-
-function DualSubApp() {
-  // Theme State
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
   const [activeTab, setActiveTab] = useState<TabView>(TabView.UPLOAD);
-  
-  // Batch State
-  const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
-  const [activeItemId, setActiveItemId] = useState<string | null>(null);
-  
-  // Auto-select first item if none selected
-  useEffect(() => {
-      if (batchItems.length > 0 && !activeItemId) {
-          setActiveItemId(batchItems[0].id);
-      } else if (batchItems.length === 0 && activeItemId) {
-          setActiveItemId(null);
-      }
-  }, [batchItems, activeItemId]);
-
-  // Settings
-  const [autoContext, setAutoContext] = useState(true);
-  const [autoBible, setAutoBible] = useState(true);
-  const [smartTiming, setSmartTiming] = useState(true); 
-  const [targetLang, setTargetLang] = useState<string>(() => localStorage.getItem('target_language') || 'Vietnamese');
-  
-  // Model Configuration State
-  const [modelConfig, setModelConfig] = useState<ModelConfig>({
-      provider: 'gemini',
-      modelName: 'gemini-3-flash-preview',
-      temperature: 0.3,
-      topP: 0.95,
-      topK: 40,
-      maxOutputTokens: 8192,
-      useSimulation: false,
-      localEndpoint: 'http://127.0.0.1:8080/v1/chat/completions',
-      apiKey: ''
-  });
   const [showModelSettings, setShowModelSettings] = useState(false);
-  const [customModelMode, setCustomModelMode] = useState(false);
+  const [showStyleConfig, setShowStyleConfig] = useState(false);
+  
+  // Toast
+  const { addToast } = useToast();
+
+  // Active Item & Auto-Preview
+  const activeItem = React.useMemo(() => 
+    batchItems.find(item => item.id === activeItemId) || batchItems[0],
+    [batchItems, activeItemId]
+  );
+
+  // Hooks
+  const estimation = useCostEstimator(activeItem, modelConfig);
+  const { 
+      handleFileUpload, 
+      handleImportTranslation, 
+      handleSubtitleSelection, 
+      handleDownloadAll, 
+      removeBatchItem, 
+      clearAll 
+  } = useSubtitleFile(setActiveTab);
+  
+  const { handleTranslateAll, isTranslatingRef } = useTranslationEngine();
 
   // Check if current OpenAI model is custom or preset
   useEffect(() => {
@@ -307,52 +66,7 @@ function DualSubApp() {
         const isPreset = OPENAI_PRESETS.some(grp => grp.options.some(opt => opt.id === modelConfig.modelName));
         setCustomModelMode(!isPreset && modelConfig.modelName !== 'gpt-4o');
     }
-  }, [modelConfig.provider]);
-
-  // Style Configuration State - Load from localStorage if available
-  const [styleConfig, setStyleConfig] = useState<AssStyleConfig>(() => {
-    try {
-        const saved = localStorage.getItem('user_style_config');
-        return saved ? JSON.parse(saved) : STYLE_PRESETS.DEFAULT;
-    } catch {
-        return STYLE_PRESETS.DEFAULT;
-    }
-  });
-  const [showStyleConfig, setShowStyleConfig] = useState(false);
-  
-  // Toast
-  const { addToast } = useToast();
-
-  // Token Estimator State
-  const [estimation, setEstimation] = useState<{ cost: string, count: number } | null>(null);
-
-  // Auto-save style configuration changes
-  useEffect(() => {
-    localStorage.setItem('user_style_config', JSON.stringify(styleConfig));
-  }, [styleConfig]);
-
-  // Confirmation Request State
-  const [confirmationRequest, setConfirmationRequest] = useState<{ itemId: string; fileName: string; detectedLanguage: string; resolve: (val: boolean) => void } | null>(null);
-
-  useEffect(() => {
-    if (confirmationRequest) {
-        console.log("Confirmation requested:", confirmationRequest);
-        // Auto-resolve for now since UI is missing? Or just log.
-        // If UI is missing, the promise will never resolve, and translation will hang!
-        // This is a critical bug. I should auto-resolve it if UI is missing.
-        // But maybe the user wants me to fix the UI?
-        // The prompt didn't ask for it.
-        // But I can't leave the app hanging.
-        // I'll add a simple window.confirm fallback.
-        const confirmed = window.confirm(`Detected language: ${confirmationRequest.detectedLanguage}. Continue?`);
-        confirmationRequest.resolve(confirmed);
-        setConfirmationRequest(null);
-    }
-  }, [confirmationRequest]);
-
-  // Editor State
-  // const [editorItem, setEditorItem] = useState<{ id: string; type: 'bible' | 'context' } | null>(null);
-  // const [editorContent, setEditorContent] = useState('');
+  }, [modelConfig.provider, modelConfig.modelName, setCustomModelMode]);
 
   // Log Viewer State
   const [viewingLogs] = useState<string | null>(null);
@@ -360,23 +74,6 @@ function DualSubApp() {
 
   // Preview Selection State
   const [previewLineId, setPreviewLineId] = useState<number | null>(null);
-
-  // Refs
-  const isCancelled = useRef(false);
-  const isTranslating = useRef(false);
-  const completedLinesRef = useRef(0);
-  const activeLinesRef = useRef(0); 
-  const progressValueRef = useRef(0);
-
-  // Theme Logic
-  useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    localStorage.setItem('theme', theme);
-  }, [theme]);
 
   // Log auto-scroll
   useEffect(() => {
@@ -386,63 +83,32 @@ function DualSubApp() {
   }, [viewingLogs, batchItems]);
 
   const toggleTheme = () => {
-    setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+    setTheme(theme === 'dark' ? 'light' : 'dark');
   };
-
-  // Session Recovery
-  useEffect(() => {
-    const restoreSession = async () => {
-        const savedItems = await loadSession();
-        if (savedItems && savedItems.length > 0) {
-            const itemsWithLogs = savedItems.map(item => ({...item, logs: item.logs || []}));
-            setBatchItems(itemsWithLogs);
-            if (savedItems.length > 0) setActiveItemId(savedItems[0].id);
-        }
-    };
-    restoreSession();
-  }, []);
-
-  // Save Session
-  useEffect(() => {
-      const timeout = setTimeout(() => {
-          if (batchItems.length > 0) saveSession(batchItems);
-      }, 1000);
-      return () => clearTimeout(timeout);
-  }, [batchItems]);
-
-  // Active Item & Auto-Preview
-  const activeItem = batchItems.find(item => item.id === activeItemId) || batchItems[0];
   
   useEffect(() => {
-      if (previewLineId && activeItem?.subtitles.some(s => s.id === previewLineId)) return;
       if (activeItem && activeItem.subtitles.length > 0) {
+          // If previewLineId is already set and valid for this item, keep it
+          if (previewLineId && activeItem.subtitles.some(s => s.id === previewLineId)) return;
+
           const sample = activeItem.subtitles.slice(0, 50);
           const longest = sample.reduce((prev, current) => (prev.originalText.length > current.originalText.length) ? prev : current, sample[0]);
           if(longest) setPreviewLineId(longest.id);
       } else {
           setPreviewLineId(null);
       }
-  }, [activeItemId, activeItem, previewLineId]);
-
-  // Cost Estimation Effect
-  useEffect(() => {
-      if (!activeItem) {
-          setEstimation(null);
-          return;
-      }
-      // Calculate only for pending lines to be useful for "Translate" action context
-      // Or just total file for general info. Let's do Total File Cost as that is most informative.
-      const { inputTokens, outputTokens, cost } = estimateTokens(activeItem.subtitles, modelConfig.modelName);
-      setEstimation({ cost, count: inputTokens + outputTokens });
-  }, [activeItem, modelConfig.modelName]);
+      // Only re-run when active item changes (not on every progress update)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeItemId]);
 
   // Preview Data
-  const selectedSubtitle = activeItem?.subtitles?.find(s => s.id === previewLineId);
+  const selectedSubtitle = React.useMemo(() => 
+    activeItem?.subtitles?.find(s => s.id === previewLineId),
+    [activeItem, previewLineId]
+  );
   const sampleOriginal = selectedSubtitle?.originalText || "Select a subtitle line to preview style.";
   const sampleTranslated = selectedSubtitle?.translatedText || "";
   
-  // const translatingItem = batchItems.find(i => i.status === 'translating');
-
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
       setTargetLang(e.target.value);
       localStorage.setItem('target_language', e.target.value);
@@ -457,428 +123,7 @@ function DualSubApp() {
       }
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
 
-    // Helper to read file text
-    const readFile = (file: File): Promise<{file: File, content: string}> => {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve({ file, content: e.target?.result as string || '' });
-            reader.onerror = () => resolve({ file, content: '' }); 
-            reader.readAsText(file);
-        });
-    };
-
-    const fileList = Array.from(files);
-    const results = await Promise.all(fileList.map(readFile));
-    let addedCount = 0;
-    
-    // Parse all files first
-    const parsedFiles = results.map(({ file, content }) => {
-        try {
-            const subtitles = parseSubtitle(content, file.name);
-            const nameNoExt = file.name.replace(/\.(srt|ass|vtt|ssa)$/i, "");
-            return { file, subtitles, nameNoExt, valid: subtitles.length > 0 };
-        } catch (e) {
-            return { file, subtitles: [], nameNoExt: file.name, valid: false };
-        }
-    });
-
-    setBatchItems(prev => {
-        const nextBatch = [...prev];
-        const usedIndices = new Set<number>();
-
-        // 1. Try to merge new files into EXISTING batch items
-        parsedFiles.forEach((pFile, idx) => {
-            if (!pFile.valid) return;
-
-            // Find match in existing items (checks if pFile is translation of existing)
-            const matchIndex = nextBatch.findIndex(existing => {
-                 const existingNameNoExt = existing.fileName.replace(/\.(srt|ass|vtt|ssa)$/i, "");
-                 if (pFile.nameNoExt.startsWith(existingNameNoExt)) {
-                     const suffix = pFile.nameNoExt.substring(existingNameNoExt.length);
-                     // Check suffix: -xx, _xx, .xx, or (1)
-                     return /^([-_.]\w{2}|\s\(\d+\))$/.test(suffix);
-                 }
-                 return false;
-            });
-
-            if (matchIndex !== -1) {
-                const existing = nextBatch[matchIndex];
-                try {
-                    const merged = mergeAndOptimizeSubtitles(existing.subtitles, pFile.subtitles, smartTiming);
-                    
-                    nextBatch[matchIndex] = {
-                        ...existing,
-                        subtitles: merged,
-                        status: 'completed',
-                        progress: 100,
-                        message: `Merged: ${pFile.file.name}`
-                    };
-                    usedIndices.add(idx);
-                    addToast(`Merged ${pFile.file.name} into existing item`, 'success');
-                } catch (e) {
-                    console.error("Auto-merge failed:", e);
-                    addToast(`Failed to auto-merge ${pFile.file.name}: ${(e as Error).message}`, 'error');
-                }
-            }
-        });
-
-        // 2. Pair remaining new files with each other
-        const remainingFiles = parsedFiles
-            .map((f, i) => ({ ...f, origIndex: i }))
-            .filter((_, i) => !usedIndices.has(i));
-
-        // Sort by name length (shortest is likely source)
-        remainingFiles.sort((a, b) => a.nameNoExt.length - b.nameNoExt.length);
-
-        const mergedInBatch = new Set<number>(); // IDs within remainingFiles array
-        const newBatchItems: BatchItem[] = [];
-
-        remainingFiles.forEach((source, i) => {
-            if (mergedInBatch.has(i)) return; 
-
-            let currentSubtitles = source.subtitles;
-            let status: BatchItem['status'] = source.valid ? 'pending' : 'error';
-            let message = source.valid ? `Ready (${source.subtitles.length} lines)` : 'Parse Error';
-            let progress = 0;
-
-            if (source.valid) {
-                // Look for translations of this source in the rest of the new files
-                remainingFiles.forEach((trans, j) => {
-                    if (i === j) return;
-                    if (mergedInBatch.has(j)) return;
-                    if (!trans.valid) return;
-
-                    if (trans.nameNoExt.startsWith(source.nameNoExt)) {
-                         const suffix = trans.nameNoExt.substring(source.nameNoExt.length);
-                         if (/^([-_.]\w{2}|\s\(\d+\))$/.test(suffix)) {
-                             // Matched translation
-                             try {
-                                 currentSubtitles = mergeAndOptimizeSubtitles(currentSubtitles, trans.subtitles, smartTiming);
-                                 status = 'completed';
-                                 progress = 100;
-                                 message = `Auto-merged: ${trans.file.name}`;
-                                 mergedInBatch.add(j);
-                             } catch (e) {
-                                 console.error("Auto-merge pair failed:", e);
-                                 // Don't mark as merged, let it be added as separate file
-                                 addToast(`Failed to pair ${trans.file.name}: ${(e as Error).message}`, 'info');
-                             }
-                         }
-                    }
-                });
-            }
-
-            newBatchItems.push({
-                id: crypto.randomUUID(),
-                fileName: source.file.name,
-                originalFile: source.file,
-                subtitles: currentSubtitles,
-                status: status,
-                progress: progress,
-                message: message,
-                logs: []
-            });
-            addedCount++;
-        });
-        
-        return [...nextBatch, ...newBatchItems];
-    });
-
-    if (addedCount > 0) addToast(`Added ${addedCount} files to queue`, 'success');
-    
-    // Clear input
-    event.target.value = '';
-  };
-
-  const handleImportTranslation = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-        
-        if (!activeItemId) {
-            addToast("Please select a file from the queue first.", "error");
-            return;
-        }
-        
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const content = e.target?.result as string;
-            try {
-                const importedSubtitles = parseSubtitle(content, file.name);
-                
-                if (!importedSubtitles || importedSubtitles.length === 0) {
-                    throw new Error("Imported file contains no valid subtitles.");
-                }
-
-                // Find the active item to merge with
-                const activeItem = batchItems.find(item => item.id === activeItemId);
-                if (!activeItem) throw new Error("Active item not found.");
-
-                // Perform merge logic OUTSIDE setBatchItems to catch errors
-                const mergedSubtitles = mergeAndOptimizeSubtitles(
-                    activeItem.subtitles,
-                    importedSubtitles,
-                    smartTiming
-                );
-                
-                setBatchItems(prev => prev.map(item => {
-                    if (item.id !== activeItemId) return item;
-                    return {
-                        ...item,
-                        subtitles: mergedSubtitles,
-                        status: 'completed',
-                        progress: 100,
-                        message: 'Translation Imported & Optimized'
-                    };
-                }));
-                addToast("Translation merged successfully", "success");
-            } catch (err) {
-                console.error("Import failed:", err);
-                addToast((err as Error).message || "Failed to parse imported translation file", "error");
-            }
-        };
-        reader.readAsText(file);
-        
-        // Reset input
-        event.target.value = '';
-  };
-
-  const handleSubtitleSelection = (content: string, name: string) => {
-      try {
-          const parsed = parseSubtitle(content, name);
-          const newItem: BatchItem = {
-              id: crypto.randomUUID(),
-              fileName: name,
-              subtitles: parsed,
-              status: 'pending',
-              progress: 0,
-              message: `Ready (${parsed.length} lines)`,
-              logs: []
-          };
-          setBatchItems(prev => [...prev, newItem]);
-          setActiveItemId(newItem.id);
-          setActiveTab(TabView.UPLOAD);
-          addToast(`Loaded subtitle: ${name}`, 'success');
-      } catch (err) {
-          addToast("Failed to parse the downloaded subtitle", "error");
-      }
-  };
-  
-  /*
-  const openEditor = (e: React.MouseEvent, id: string, type: 'bible' | 'context') => {
-      e.stopPropagation();
-      const item = batchItems.find(i => i.id === id);
-      if (item) {
-          setEditorItem({ id, type });
-          setEditorContent(type === 'bible' ? (item.showBible || '') : (item.context || ''));
-      }
-  };
-
-  const saveEditor = () => {
-      if (editorItem) {
-          setBatchItems(prev => prev.map(pi => pi.id === editorItem.id ? { 
-              ...pi, 
-              [editorItem.type === 'bible' ? 'showBible' : 'context']: editorContent 
-          } : pi));
-          setEditorItem(null);
-      }
-  };
-  */
-
-  const translateSingleFile = async (itemId: string) => {
-      const itemIndex = batchItems.findIndex(i => i.id === itemId);
-      if (itemIndex === -1) return;
-      const item = batchItems[itemIndex];
-      if (item.subtitles.length === 0) return;
-
-      setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, status: 'translating', progress: 0, message: 'Starting...', logs: [] } : pi));
-      completedLinesRef.current = 0;
-      activeLinesRef.current = 0;
-      progressValueRef.current = 0;
-      const totalLines = item.subtitles.length;
-
-      const logInfo = (message: string, type: 'info' | 'request' | 'response' | 'error' = 'info', data?: any) => {
-          const entry: LogEntry = { timestamp: Date.now(), type, message, data };
-          setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, logs: [...pi.logs, entry] } : pi));
-      };
-
-      const { isEnglish, language } = await detectLanguage(item.subtitles, modelConfig.useSimulation, modelConfig);
-      
-      if (!isEnglish) {
-           setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, message: `Detected: ${language}` } : pi));
-           const userConfirmed = await new Promise<boolean>((resolve) => {
-               setConfirmationRequest({ itemId, fileName: item.fileName, detectedLanguage: language, resolve: (val) => { setConfirmationRequest(null); resolve(val); } });
-           });
-           if (!userConfirmed) {
-                setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, status: 'error', progress: 0, message: `Cancelled (${language})` } : pi));
-                return;
-           }
-      }
-
-      let showName = "";
-      if (autoContext || autoBible) {
-          showName = await identifyShowName(item.fileName, modelConfig.useSimulation, modelConfig);
-          const cachedMetadata = await loadShowMetadata(showName);
-          let context = item.context || cachedMetadata?.context || "";
-          let showBible = item.showBible || cachedMetadata?.bible || "";
-          let newDataGenerated = false;
-
-          if (autoContext && !context) {
-              setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, message: 'Analyzing plot context...' } : pi));
-              try { 
-                  context = await generateContext(item.fileName, modelConfig.useSimulation, modelConfig); 
-                  newDataGenerated = true;
-              } catch(e) { console.error(e); }
-          }
-          if (autoBible && !showBible) {
-              setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, message: 'Generating Glossary...' } : pi));
-              try { 
-                  showBible = await generateShowBible(item.fileName, targetLang, modelConfig.useSimulation, modelConfig);
-                  newDataGenerated = true;
-              } catch (e) { console.error(e); }
-          }
-          setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, context: context, showBible: showBible } : pi));
-          if (newDataGenerated && showName) await saveShowMetadata(showName, { context, bible: showBible });
-      }
-
-      // Re-read for latest
-      let contextToUse = item.context || "";
-      let bibleToUse = item.showBible || "";
-      if (!contextToUse && showName) contextToUse = (await loadShowMetadata(showName))?.context || "";
-      if (!bibleToUse && showName) bibleToUse = (await loadShowMetadata(showName))?.bible || "";
-      
-      const safeDurations = calculateSafeDurations(item.subtitles);
-      const newSubtitles = [...item.subtitles];
-      interface ChunkData { lines: SubtitleLine[]; previous: SubtitleLine[]; chunkIndex: number; totalChunks: number }
-      const chunks: ChunkData[] = [];
-      for (let i = 0; i < totalLines; i += BATCH_SIZE) {
-        const chunkLines = newSubtitles.slice(i, i + BATCH_SIZE);
-        const previousLines = i > 0 ? newSubtitles.slice(Math.max(0, i - OVERLAP_SIZE), i) : [];
-        chunks.push({ lines: chunkLines, previous: previousLines, chunkIndex: Math.floor(i / BATCH_SIZE) + 1, totalChunks: Math.ceil(totalLines/BATCH_SIZE) });
-      }
-
-      const processChunk = async (chunkData: ChunkData) => {
-          if (isCancelled.current) return;
-          const { lines, previous, chunkIndex } = chunkData;
-          activeLinesRef.current += lines.length; 
-          const linesToTranslate = lines.filter(l => !l.translatedText);
-          
-          if (linesToTranslate.length > 0) {
-              let chunkAttempts = 0;
-              let chunkSuccess = false;
-              while (chunkAttempts < 3 && !chunkSuccess && !isCancelled.current) {
-                  chunkAttempts++;
-                  try {
-                      if (chunkAttempts > 1) setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, message: `Retrying block ${chunkIndex}...` } : pi));
-                      const translations = await translateBatch(linesToTranslate, targetLang, contextToUse, previous, modelConfig, safeDurations, bibleToUse, logInfo);
-                      const missingIds = linesToTranslate.filter(l => !translations.has(l.id));
-                      if (missingIds.length === 0) {
-                          linesToTranslate.forEach(line => { if (translations.has(line.id)) line.translatedText = translations.get(line.id); });
-                          chunkSuccess = true;
-                      } else {
-                           linesToTranslate.forEach(line => { if (translations.has(line.id)) line.translatedText = translations.get(line.id); });
-                      }
-                  } catch (error: any) {
-                      if (error.message?.includes("TERMINAL")) {
-                           setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, status: 'error', message: `Stopped: ${error.message}` } : pi));
-                           isCancelled.current = true;
-                           return; 
-                      }
-                      await new Promise(r => setTimeout(r, 1000 * chunkAttempts));
-                  }
-              }
-          }
-          activeLinesRef.current -= lines.length; 
-          completedLinesRef.current += lines.length;
-          const percentage = Math.round((completedLinesRef.current / totalLines) * 100);
-          setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, subtitles: [...newSubtitles], progress: percentage, message: `Translating... ${percentage}%` } : pi));
-      };
-
-      const chunkQueue = [...chunks];
-      const workers = Array.from({ length: CONCURRENCY }, () => (async () => {
-          while (chunkQueue.length > 0 && !isCancelled.current) {
-              const chunk = chunkQueue.shift();
-              if (chunk) await processChunk(chunk);
-          }
-      })());
-      await Promise.all(workers);
-      
-      // Final Verification (Simplified for brevity in update)
-      if (!isCancelled.current) {
-          setBatchItems(prev => prev.map(pi => pi.id === itemId ? { ...pi, status: 'completed', progress: 100, message: 'Done' } : pi));
-          addToast(`Translation completed: ${item.fileName}`, 'success');
-      }
-  };
-
-  const handleTranslateAll = async () => {
-      // API Key Check logic
-      if (!modelConfig.useSimulation) {
-           if (modelConfig.provider === 'gemini' && !process.env.API_KEY) { 
-               addToast("System Error: Gemini API Key is missing.", "error"); return; 
-           }
-           if (modelConfig.provider === 'google_nmt' && !modelConfig.apiKey) {
-               addToast("System Error: Google Cloud API Key is missing for NMT.", "error"); return;
-           }
-      }
-
-      isCancelled.current = false;
-      isTranslating.current = true;
-      const pendingItems = batchItems.filter(i => i.status === 'pending' || i.status === 'error');
-      
-      if (pendingItems.length === 0) {
-          addToast("No pending files to translate", "info");
-          isTranslating.current = false;
-          return;
-      }
-      
-      addToast(`Starting translation for ${pendingItems.length} files...`, "info");
-      
-      for (const item of pendingItems) {
-          if (isCancelled.current) break;
-          await translateSingleFile(item.id);
-      }
-      isTranslating.current = false;
-  };
-
-  const handleDownloadSingle = (id: string) => {
-      const item = batchItems.find(i => i.id === id);
-      if (!item) return;
-      const content = generateSubtitleContent(item.subtitles, styleConfig, smartTiming);
-      const ext = styleConfig.outputFormat === 'srt' ? '.srt' : '.ass';
-      downloadFile(content, item.fileName.replace(/\.(srt|ass|vtt)$/i, '') + ext);
-      addToast(`Downloaded ${item.fileName}`, 'success');
-  };
-
-  const handleDownloadAll = async () => {
-      const completedItems = batchItems.filter(i => i.status === 'completed');
-      if (completedItems.length === 0) return;
-      
-      addToast(`Downloading ${completedItems.length} files...`, 'info');
-      for (const item of completedItems) {
-          handleDownloadSingle(item.id);
-          await new Promise(resolve => setTimeout(resolve, 500));
-      }
-  };
-
-  const removeBatchItem = (id: string) => {
-      setBatchItems(prev => {
-          const newState = prev.filter(i => i.id !== id);
-          if (activeItemId === id) setActiveItemId(newState.length > 0 ? newState[0].id : null);
-          return newState;
-      });
-  };
-
-  const clearAll = () => {
-      if (window.confirm("Clear all files and history?")) {
-        setBatchItems([]);
-        setActiveItemId(null);
-        clearSession();
-        addToast("Workspace cleared", "info");
-      }
-  };
 
   const completedCount = batchItems.filter(i => i.status === 'completed').length;
   const getDownloadLabel = () => completedCount === 1 ? `Download` : `Download All (${completedCount})`;
@@ -928,28 +173,7 @@ function DualSubApp() {
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col font-sans transition-colors duration-300">
-      {/* Header */}
-      <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 z-50">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-2 group cursor-default">
-            <div className="bg-yellow-500 p-2.5 rounded-xl shadow-lg shadow-yellow-500/20 group-hover:shadow-yellow-500/40 transition-all">
-              <FileText className="w-5 h-5 text-black" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-zinc-900 dark:text-white leading-none">DualSub AI</h1>
-              <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold mt-1">Cinema Grade Translator</p>
-            </div>
-          </div>
-          <div className="flex gap-4 items-center">
-             <button onClick={toggleTheme} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} className="p-2.5 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white rounded-full bg-zinc-100 dark:bg-zinc-800/30 hover:bg-zinc-200 dark:hover:bg-zinc-800">
-                 {theme === 'dark' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
-             </button>
-             <button onClick={() => setShowModelSettings(true)} aria-label="Open model settings" className="p-2.5 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white rounded-full bg-zinc-100 dark:bg-zinc-800/30 hover:bg-zinc-200 dark:hover:bg-zinc-800">
-                 <Cog className="w-5 h-5" />
-             </button>
-          </div>
-        </div>
-      </header>
+      <Header theme={theme} toggleTheme={toggleTheme} onOpenSettings={() => setShowModelSettings(true)} />
 
       <main className="flex-1 max-w-5xl mx-auto w-full px-6 py-8">
             
@@ -979,68 +203,14 @@ function DualSubApp() {
                 </div>
             ) : (
                 <div className="space-y-6">
-                    {/* 1. Upload & Queue Section */}
-                    <div 
-                        className={`relative border-2 border-dashed rounded-2xl p-8 transition-all duration-300 text-center group overflow-hidden focus-within:ring-2 focus-within:ring-yellow-500 ${batchItems.length > 0 ? 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/20' : 'border-zinc-300 dark:border-zinc-700 hover:border-yellow-500/50 hover:bg-zinc-100 dark:hover:bg-zinc-900/50'}`}
-                        tabIndex={0}
-                        aria-label="File upload area. Drop subtitles here or click to upload."
-                    >
-                        <input 
-                            type="file" 
-                            accept=".srt,.ass,.ssa,.vtt" 
-                            multiple 
-                            onChange={handleFileUpload}
-                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                            aria-label="Upload subtitle files"
-                        />
-                        {batchItems.length === 0 ? (
-                            <div className="flex flex-col items-center gap-4">
-                                <div className="w-20 h-20 bg-zinc-200 dark:bg-zinc-800/50 rounded-full flex items-center justify-center text-zinc-400 group-hover:text-yellow-600 dark:group-hover:text-yellow-500 transition-colors">
-                                    <Upload className="w-8 h-8" />
-                                </div>
-                                <h3 className="text-lg font-bold text-zinc-700 dark:text-white">Drop subtitles here</h3>
-                                <p className="text-zinc-500 text-sm">Supports .srt, .ass, .vtt</p>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col gap-4 pointer-events-auto relative z-20">
-                                <div className="flex justify-between items-center pb-2 border-b border-zinc-200 dark:border-zinc-800/50">
-                                    <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Queue ({batchItems.length})</h3>
-                                    <div className="flex gap-3">
-                                         <button onClick={clearAll} className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Clear</button>
-                                         <button className="text-[10px] font-bold text-yellow-600 uppercase tracking-wider relative">
-                                            Add +
-                                            <input type="file" multiple onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" aria-label="Add more files" />
-                                         </button>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[250px] overflow-y-auto pr-1">
-                                    {batchItems.map(item => (
-                                        <div 
-                                            key={item.id}
-                                            onClick={() => setActiveItemId(item.id)}
-                                            className={`p-3 rounded-xl border flex items-center gap-3 cursor-pointer transition-all relative overflow-hidden ${activeItemId === item.id ? 'bg-zinc-100 dark:bg-zinc-800 border-yellow-500/30 shadow-sm' : 'bg-white dark:bg-zinc-900/40 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800'}`}
-                                        >
-                                            {activeItemId === item.id && <div className="absolute left-0 top-0 bottom-0 w-1 bg-yellow-500" />}
-                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 border ${item.status === 'completed' ? 'bg-green-500/10 border-green-500/20 text-green-600' : item.status === 'translating' ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-600' : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-400'}`}>
-                                                {item.status === 'translating' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-medium truncate text-zinc-900 dark:text-zinc-200">{item.fileName}</p>
-                                                {item.status === 'translating' ? (
-                                                    <div className="h-1 bg-zinc-200 dark:bg-zinc-700 rounded-full mt-2 overflow-hidden">
-                                                        <div className="h-full bg-yellow-500 transition-all duration-300" style={{width: `${item.progress}%`}} />
-                                                    </div>
-                                                ) : (
-                                                    <p className="text-[10px] text-zinc-500 truncate">{item.message}</p>
-                                                )}
-                                            </div>
-                                            <button onClick={(e) => {e.stopPropagation(); removeBatchItem(item.id)}} aria-label={`Remove ${item.fileName}`} className="text-zinc-400 hover:text-red-500 p-1"><Trash2 className="w-3.5 h-3.5" /></button>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    <BatchQueue 
+                        batchItems={batchItems}
+                        activeItemId={activeItemId}
+                        setActiveItemId={(id) => batchDispatch({ type: 'SET_ACTIVE_ITEM', payload: id })}
+                        onFileUpload={handleFileUpload}
+                        onRemoveItem={removeBatchItem}
+                        onClearAll={clearAll}
+                    />
 
                     {/* 2. Command Center & Actions */}
                     {batchItems.length > 0 && (
@@ -1098,504 +268,142 @@ function DualSubApp() {
                                         aria-pressed={smartTiming}
                                         className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-medium border transition-all ${smartTiming ? 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-300' : 'bg-white dark:bg-zinc-950/50 border-zinc-200 dark:border-zinc-800 text-zinc-500'}`}
                                     >
-                                        <Hourglass className="w-3 h-3" /> Timing
+                                        <Hourglass className="w-3 h-3" /> Smart Timing
                                     </button>
                                  </div>
                             </div>
 
-                            {/* Main Actions & Cost Estimator */}
-                            <div className="flex flex-col gap-3">
-                                {/* Actions Row */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={handleTranslateAll}
-                                            disabled={isTranslating.current}
-                                            className={`flex-1 group relative p-4 rounded-xl flex items-center justify-center gap-3 transition-all overflow-hidden ${
-                                                isTranslating.current 
-                                                ? 'bg-zinc-200 dark:bg-zinc-800 cursor-not-allowed text-zinc-500'
-                                                : 'bg-yellow-500 text-black font-bold hover:shadow-[0_0_30px_-10px_rgba(234,179,8,0.5)] hover:scale-[1.02]'
-                                            }`}
-                                        >
-                                            {isTranslating.current ? 'Processing...' : <><RefreshCw className="w-5 h-5 transition-transform group-hover:rotate-180" /> <span>Translate</span></>}
-                                        </button>
-                                        
-                                        <button
-                                            className={`relative p-4 rounded-xl flex items-center justify-center gap-2 font-bold transition-all border w-16 group ${
+                            {/* Main Actions */}
+                            <div className="flex gap-4">
+                                <button 
+                                    onClick={handleTranslateAll}
+                                    disabled={isTranslatingRef.current}
+                                    className={`flex-[2] py-4 px-6 rounded-2xl font-bold text-lg shadow-xl shadow-yellow-500/20 hover:shadow-yellow-500/40 transform hover:-translate-y-0.5 transition-all flex items-center justify-center gap-3 ${isTranslatingRef.current ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed' : 'bg-yellow-500 text-black hover:bg-yellow-400'}`}
+                                >
+                                    {isTranslatingRef.current ? (
+                                        <><RefreshCw className="w-6 h-6 animate-spin" /> Translating...</>
+                                    ) : (
+                                        <><Sparkles className="w-6 h-6" /> Translate All</>
+                                    )}
+                                </button>
+                                
+                                <div className="flex-1 flex gap-2">
+                                     {/* Merge Translation Button */}
+                                    <div className="relative flex-1 group">
+                                        <button 
+                                            className={`w-full h-full rounded-xl border font-medium flex flex-col items-center justify-center gap-1 transition-all ${
                                                 !activeItemId 
-                                                ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-300 dark:text-zinc-600 border-zinc-200 dark:border-zinc-800 cursor-not-allowed' 
-                                                : 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-200 border-zinc-300 dark:border-zinc-700'
+                                                ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-400 cursor-not-allowed' 
+                                                : 'bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
                                             }`}
-                                            title={!activeItemId ? "Select a file to merge" : "Import translated file to merge"}
-                                            aria-label="Merge existing translation"
                                             disabled={!activeItemId}
+                                            aria-label={!activeItemId ? "Select a file to merge translation" : "Merge existing translation"}
                                         >
                                             <FileInput className="w-5 h-5" />
-                                            <div className="absolute bottom-full mb-2 hidden group-hover:block bg-black text-white text-xs px-2 py-1 rounded whitespace-nowrap">
-                                                {!activeItemId ? "Select a file first" : "Merge Translation"}
-                                            </div>
-                                            <input 
-                                                type="file" 
-                                                accept=".srt,.ass,.ssa,.vtt" 
-                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
-                                                onChange={handleImportTranslation}
-                                                disabled={!activeItemId}
-                                                aria-label="Upload translated subtitle to merge"
-                                            />
+                                            <span className="text-xs">Merge Translation</span>
                                         </button>
+                                        <input 
+                                            type="file" 
+                                            accept=".srt,.ass,.ssa,.vtt" 
+                                            onChange={handleImportTranslation}
+                                            disabled={!activeItemId}
+                                            className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                                            title={!activeItemId ? "Select a file first" : "Import translation file"}
+                                        />
+                                        {!activeItemId && (
+                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2 py-1 bg-zinc-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                                Select a file first
+                                            </div>
+                                        )}
                                     </div>
 
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={handleDownloadAll}
-                                            disabled={completedCount === 0}
-                                            className="flex-1 py-3 px-4 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            <DownloadIcon className="w-4 h-4" /> 
-                                            {getDownloadLabel()}
-                                        </button>
-                                        <button 
-                                            onClick={() => setShowStyleConfig(!showStyleConfig)}
-                                            aria-label="Open style settings"
-                                            aria-expanded={showStyleConfig}
-                                            className={`px-4 rounded-xl transition-all border ${showStyleConfig ? 'bg-zinc-200 dark:bg-zinc-200 text-black border-zinc-300' : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-500'}`}
-                                        >
-                                            <Settings2 className="w-5 h-5" />
-                                        </button>
-                                    </div>
+                                    <button 
+                                        onClick={handleDownloadAll}
+                                        disabled={completedCount === 0}
+                                        className="flex-1 py-3 px-4 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <DownloadIcon className="w-4 h-4" /> 
+                                        {getDownloadLabel()}
+                                    </button>
                                 </div>
-                                
-                                {/* Token & Cost Estimator Pill */}
-                                {activeItem && activeItem.status !== 'completed' && (
-                                    <div className="flex justify-center">
-                                        <div 
-                                            className="relative group inline-flex items-center gap-4 bg-zinc-100 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-full px-4 py-1.5 shadow-sm cursor-help transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-900"
-                                            tabIndex={0}
-                                            aria-label="Cost Estimation Tooltip"
-                                        >
-                                            <InfoTooltip text={modelConfig.provider === 'google_nmt' 
-                                                ? "Cost based on total character count (€20.00 per 1 Million characters)." 
-                                                : "Estimated cost based on Input Tokens (Source Text + Prompt) and Output Tokens (Translation). Prices vary by model."} 
-                                            />
-                                            <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
-                                                <Cpu className="w-3.5 h-3.5" />
-                                                <span>{modelConfig.modelName === 'google_nmt' ? 'Google Translate (NMT)' : modelConfig.modelName.split('/').pop()?.replace('-preview', '')}</span>
-                                            </div>
-                                            <div className="w-px h-3 bg-zinc-300 dark:bg-zinc-700"></div>
-                                            {estimation ? (
-                                                <div className="flex items-center gap-3">
-                                                    {modelConfig.provider === 'google_nmt' ? (
-                                                        // NMT shows characters, not tokens
-                                                        <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300">
-                                                            <Type className="w-3.5 h-3.5" />
-                                                            <span>~{(estimation.count).toLocaleString()} chars</span>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300">
-                                                            <ScrollText className="w-3.5 h-3.5" />
-                                                            <span>~{(estimation.count / 1000).toFixed(1)}k tokens</span>
-                                                        </div>
-                                                    )}
-                                                    
-                                                    <div className="flex items-center gap-1.5 text-xs font-bold text-green-600 dark:text-green-400">
-                                                        <Coins className="w-3.5 h-3.5" />
-                                                        <span>{estimation.cost}</span>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <span className="text-xs text-zinc-400 italic">Calculating estimate...</span>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
                             </div>
-
-                           {/* Collapsible Style Inspector & Preview - RESTRUCTURED */}
-                           {showStyleConfig && (
-                                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-2xl animate-in fade-in slide-in-from-top-4">
-                                    
-                                    {/* Header / Presets */}
-                                    <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-3 bg-zinc-50 dark:bg-zinc-900/50">
-                                        <div className="flex items-center gap-2 mr-auto">
-                                            <Palette className="w-4 h-4 text-zinc-500" />
-                                            <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Style Presets</span>
+                            
+                            {/* Token & Cost Estimator Pill */}
+                            {activeItem && activeItem.status !== 'completed' && (
+                                <div className="flex justify-center">
+                                    <div 
+                                        className="relative group inline-flex items-center gap-4 bg-zinc-100 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-full px-4 py-1.5 shadow-sm cursor-help transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-900"
+                                        tabIndex={0}
+                                        aria-label="Cost Estimation Tooltip"
+                                    >
+                                        <InfoTooltip text={modelConfig.provider === 'google_nmt' 
+                                            ? "Cost based on total character count (€20.00 per 1 Million characters)." 
+                                            : "Estimated cost based on Input Tokens (Source Text + Prompt) and Output Tokens (Translation). Prices vary by model."} 
+                                        />
+                                        <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                                            <Cpu className="w-3.5 h-3.5" />
+                                            <span>{modelConfig.modelName === 'google_nmt' ? 'Google Translate (NMT)' : modelConfig.modelName.split('/').pop()?.replace('-preview', '')}</span>
                                         </div>
-                                        {Object.keys(STYLE_PRESETS).map(name => (
-                                            <button 
-                                                key={name} 
-                                                onClick={() => applyPreset(name as any)} 
-                                                className="px-3 py-1.5 text-xs font-bold rounded-full bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-700 hover:border-yellow-500 dark:hover:border-yellow-500 transition-all"
-                                            >
-                                                {name}
-                                            </button>
-                                        ))}
-                                        <button onClick={resetStyles} className="ml-2 px-3 py-1.5 text-xs font-bold rounded-full text-red-500 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900 hover:bg-red-100 dark:hover:bg-red-900/20">Reset</button>
-                                    </div>
-                                    
-                                    <div className="p-6 space-y-8">
-                                        
-                                        {/* Section 1: Layout & Structure */}
-                                        <div className="space-y-4">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <Layout className="w-4 h-4 text-yellow-500" />
-                                                <h4 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Layout & Structure</h4>
-                                            </div>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <div>
-                                                    <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Export Format</label>
-                                                    <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                                            <button onClick={() => setStyleConfig({...styleConfig, outputFormat: 'ass'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${styleConfig.outputFormat === 'ass' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>ASS (Styled)</button>
-                                                            <button onClick={() => setStyleConfig({...styleConfig, outputFormat: 'srt'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${styleConfig.outputFormat === 'srt' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>SRT (Simple)</button>
+                                        <div className="w-px h-3 bg-zinc-300 dark:bg-zinc-700"></div>
+                                        {estimation ? (
+                                            <div className="flex items-center gap-3">
+                                                {modelConfig.provider === 'google_nmt' ? (
+                                                    // NMT shows characters, not tokens
+                                                    <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300">
+                                                        <Type className="w-3.5 h-3.5" />
+                                                        <span>~{(estimation.count).toLocaleString()} chars</span>
                                                     </div>
-                                                </div>
-                                                <div>
-                                                    <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Positioning</label>
-                                                    <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                                            <button onClick={() => setStyleConfig({...styleConfig, layout: 'stacked'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${styleConfig.layout === 'stacked' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>Stacked</button>
-                                                            <button onClick={() => setStyleConfig({...styleConfig, layout: 'split'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${styleConfig.layout === 'split' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>Split</button>
+                                                ) : (
+                                                    <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300">
+                                                        <ScrollText className="w-3.5 h-3.5" />
+                                                        <span>~{(estimation.count / 1000).toFixed(1)}k tokens</span>
                                                     </div>
-                                                </div>
-                                                <div className="md:col-span-2">
-                                                    <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Top Line Language</label>
-                                                    <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                                            <button onClick={() => setStyleConfig({...styleConfig, stackOrder: 'primary-top'})} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-2 ${styleConfig.stackOrder === 'primary-top' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>
-                                                            <ArrowUp className="w-3 h-3" /> {targetLang} (Translated)
-                                                            </button>
-                                                            <button onClick={() => setStyleConfig({...styleConfig, stackOrder: 'secondary-top'})} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-2 ${styleConfig.stackOrder === 'secondary-top' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>
-                                                            <ArrowDown className="w-3 h-3" /> English (Source)
-                                                            </button>
-                                                    </div>
+                                                )}
+                                                
+                                                <div className="flex items-center gap-1.5 text-xs font-bold text-green-600 dark:text-green-400">
+                                                    <Coins className="w-3.5 h-3.5" />
+                                                    <span>{estimation.cost}</span>
                                                 </div>
                                             </div>
-                                        </div>
-
-                                        <div className="h-px bg-zinc-100 dark:bg-zinc-800" />
-
-                                        {/* Section 2: Typography & Effects */}
-                                        <div className="space-y-4">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <Type className="w-4 h-4 text-blue-500" />
-                                                <h4 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">Typography & Effects</h4>
-                                            </div>
-                                            
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                <div className="md:col-span-1">
-                                                    <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Font Family</label>
-                                                    <select aria-label="Font Family" value={styleConfig.fontFamily} onChange={e => setStyleConfig({...styleConfig, fontFamily: e.target.value})} className="w-full text-xs font-bold p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:border-yellow-500 transition-colors">
-                                                        {KODI_FONTS.map(f => <option key={f} value={f}>{f}</option>)}
-                                                    </select>
-                                                </div>
-                                                <div className="md:col-span-2 grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Outline</span> <span>{styleConfig.outlineWidth}px</span></label>
-                                                        <input aria-label="Outline width" type="range" min="0" max="10" step="0.5" value={styleConfig.outlineWidth} onChange={e => setStyleConfig({...styleConfig, outlineWidth: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Shadow</span> <span>{styleConfig.shadowDepth}px</span></label>
-                                                        <input aria-label="Shadow depth" type="range" min="0" max="10" step="0.5" value={styleConfig.shadowDepth} onChange={e => setStyleConfig({...styleConfig, shadowDepth: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div className="grid grid-cols-2 gap-4">
-                                                <div>
-                                                    <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Background Style</label>
-                                                    <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                                        <button onClick={() => setStyleConfig({...styleConfig, borderStyle: 1})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${styleConfig.borderStyle === 1 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Outline</button>
-                                                        <button onClick={() => setStyleConfig({...styleConfig, borderStyle: 3})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${styleConfig.borderStyle === 3 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Box</button>
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Subtitle Lines</label>
-                                                    <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                                        <button onClick={() => setStyleConfig({...styleConfig, linesPerSubtitle: 2})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${(styleConfig.linesPerSubtitle ?? 2) === 2 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Multi-line</button>
-                                                        <button onClick={() => setStyleConfig({...styleConfig, linesPerSubtitle: 1})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${styleConfig.linesPerSubtitle === 1 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Single Line</button>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* Vertical Positioning Controls */}
-                                            {styleConfig.layout === 'stacked' && (
-                                                <div className="grid grid-cols-2 gap-4 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                                                    <div>
-                                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Bottom Spacing</span> <span>{styleConfig.screenPadding ?? 50}px</span></label>
-                                                        <input aria-label="Bottom Spacing" type="range" min="0" max="200" step="5" value={styleConfig.screenPadding ?? 50} onChange={e => setStyleConfig({...styleConfig, screenPadding: parseInt(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
-                                                    </div>
-                                                    <div>
-                                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Vertical Gap</span> <span>{styleConfig.verticalGap ?? 15}px</span></label>
-                                                        <input aria-label="Vertical Gap" type="range" min="0" max="100" step="1" value={styleConfig.verticalGap ?? 15} onChange={e => setStyleConfig({...styleConfig, verticalGap: parseInt(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Visual Preview (Moved Below Typography) */}
-                                        <div className="bg-zinc-100 dark:bg-black/40 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800 p-4">
-                                             <div className="flex items-center justify-between mb-3">
-                                                 <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
-                                                    <Eye className="w-4 h-4" /> Live Preview
-                                                </h4>
-                                                <p className="text-[10px] text-zinc-500">
-                                                    Line #{selectedSubtitle?.id || '-'}
-                                                </p>
-                                             </div>
-                                            <VisualPreview 
-                                                config={styleConfig} 
-                                                original={sampleOriginal} 
-                                                translated={sampleTranslated} 
-                                                isSample={false}
-                                            />
-                                        </div>
-
-                                        <div className="h-px bg-zinc-100 dark:bg-zinc-800" />
-
-                                        {/* Section 3: Color Palette (Reordered) */}
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                             {/* Secondary Color Control (Original Text) - MOVED FIRST */}
-                                            <div className="bg-zinc-50 dark:bg-zinc-800/30 p-4 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                                                <div className="flex items-center justify-between mb-3">
-                                                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Original Text</label>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-[10px] font-mono text-zinc-400">{styleConfig.secondary.color}</span>
-                                                        <input aria-label="Original text color" type="color" value={styleConfig.secondary.color} onChange={e => setStyleConfig({...styleConfig, secondary: {...styleConfig.secondary, color: e.target.value}})} className="w-6 h-6 rounded cursor-pointer border-0 p-0 overflow-hidden" />
-                                                    </div>
-                                                </div>
-                                                    <div>
-                                                    <label className="text-[10px] text-zinc-400 mb-1 block flex justify-between"><span>Size</span> <span>{styleConfig.secondary.fontSize}px</span></label>
-                                                    <input aria-label="Original text size" type="range" min="10" max="100" value={styleConfig.secondary.fontSize} onChange={e => setStyleConfig({...styleConfig, secondary: {...styleConfig.secondary, fontSize: parseInt(e.target.value)}})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
-                                                </div>
-                                            </div>
-
-                                            {/* Primary Color Control (Translated Text) - MOVED SECOND */}
-                                            <div className="bg-zinc-50 dark:bg-zinc-800/30 p-4 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                                                <div className="flex items-center justify-between mb-3">
-                                                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Translated Text</label>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-[10px] font-mono text-zinc-400">{styleConfig.primary.color}</span>
-                                                        <input aria-label="Translated text color" type="color" value={styleConfig.primary.color} onChange={e => setStyleConfig({...styleConfig, primary: {...styleConfig.primary, color: e.target.value}})} className="w-6 h-6 rounded cursor-pointer border-0 p-0 overflow-hidden" />
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label className="text-[10px] text-zinc-400 mb-1 block flex justify-between"><span>Size</span> <span>{styleConfig.primary.fontSize}px</span></label>
-                                                    <input aria-label="Translated text size" type="range" min="10" max="100" value={styleConfig.primary.fontSize} onChange={e => setStyleConfig({...styleConfig, primary: {...styleConfig.primary, fontSize: parseInt(e.target.value)}})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
-                                                </div>
-                                            </div>
-                                        </div>
-
+                                        ) : (
+                                            <span className="text-xs text-zinc-400 italic">Calculating estimate...</span>
+                                        )}
                                     </div>
                                 </div>
                             )}
-
-                            {/* Transcript List (Bottom) - UPDATED TO GRID */}
-                            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl flex flex-col h-[600px] overflow-hidden shadow-sm">
-                                <div className="p-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 flex justify-between items-center">
-                                    <h3 className="font-semibold text-sm">Live Transcript</h3>
-                                    <span className="text-xs text-zinc-500">{activeItem.subtitles.length} lines</span>
-                                </div>
-                                {/* Header Row */}
-                                <div className="grid grid-cols-[80px_80px_1fr_1fr] gap-4 px-4 py-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                                    <div>Start</div>
-                                    <div>End</div>
-                                    <div>Source</div>
-                                    <div>Target</div>
-                                </div>
-                                <div className="flex-1 overflow-y-auto p-0 scrollbar-thin">
-                                    {activeItem.subtitles.map((sub) => (
-                                        <div 
-                                        key={sub.id} 
-                                        id={`sub-${sub.id}`}
-                                        onClick={() => setPreviewLineId(sub.id)}
-                                        className={`grid grid-cols-[80px_80px_1fr_1fr] gap-4 px-4 py-2 border-b border-zinc-100 dark:border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 items-start ${previewLineId === sub.id ? 'bg-yellow-50 dark:bg-yellow-500/10' : ''}`}
-                                        role="row"
-                                        aria-selected={previewLineId === sub.id}
-                                        tabIndex={0}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' || e.key === ' ') {
-                                                setPreviewLineId(sub.id);
-                                            }
-                                        }}
-                                        >
-                                            <div className="font-mono text-xs text-zinc-400 pt-0.5">{sub.startTime.split(',')[0]}</div>
-                                            <div className="font-mono text-xs text-zinc-400 pt-0.5">{sub.endTime.split(',')[0]}</div>
-                                            <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-tight">{sub.originalText}</div>
-                                            <div className={`text-xs leading-tight font-medium ${sub.translatedText ? 'text-zinc-900 dark:text-zinc-200' : 'text-zinc-300 dark:text-zinc-700 italic'}`}>
-                                                {sub.translatedText || '-'}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
                         </div>
                     )}
+
+                    <StyleEditor 
+                        config={styleConfig}
+                        onChange={setStyleConfig}
+                        onReset={resetStyles}
+                        onApplyPreset={applyPreset}
+                        isOpen={showStyleConfig}
+                        onToggle={() => setShowStyleConfig(!showStyleConfig)}
+                        targetLang={targetLang}
+                        sampleOriginal={sampleOriginal}
+                        sampleTranslated={sampleTranslated}
+                        selectedSubtitleId={selectedSubtitle?.id}
+                    />
+
+                    <SubtitleEditor 
+                        activeItem={activeItem}
+                        previewLineId={previewLineId}
+                        setPreviewLineId={setPreviewLineId}
+                    />
                 </div>
             )}
             
-            {/* Model Settings Modal */}
-            {showModelSettings && (
-                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" role="dialog" aria-modal="true" aria-labelledby="model-settings-title">
-                    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-xl max-w-lg w-full shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
-                        <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
-                            <h3 id="model-settings-title" className="text-lg font-bold text-zinc-900 dark:text-white flex items-center gap-2"><Cpu className="w-5 h-5 text-yellow-500"/> Model Configuration</h3>
-                            <button onClick={() => setShowModelSettings(false)} aria-label="Close settings"><X className="w-5 h-5 text-zinc-500" /></button>
-                        </div>
-                        
-                        <div className="space-y-4">
-                             {/* Provider Selector */}
-                             <div>
-                                 <label className="text-xs font-semibold uppercase text-zinc-500 mb-2 block">AI Provider</label>
-                                 <div className="grid grid-cols-2 gap-2">
-                                     <button onClick={() => handleProviderChange('gemini')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'gemini' ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>Gemini (Google)</button>
-                                     <button onClick={() => handleProviderChange('google_nmt')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'google_nmt' ? 'bg-orange-50 dark:bg-orange-900/30 border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>Google Translate</button>
-                                     <button onClick={() => handleProviderChange('local')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'local' ? 'bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>Local (Ollama)</button>
-                                     <button onClick={() => handleProviderChange('openai')} className={`py-2 px-3 text-sm font-medium rounded-md transition-all border ${modelConfig.provider === 'openai' ? 'bg-teal-50 dark:bg-teal-900/30 border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300' : 'bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400'}`}>OpenAI / Other</button>
-                                 </div>
-                             </div>
-
-                             {/* Provider Specific Settings */}
-                             {modelConfig.provider === 'gemini' && (
-                                <div className="space-y-2">
-                                    <label className="text-xs font-semibold uppercase text-zinc-500">Model</label>
-                                    <select aria-label="Gemini model" value={modelConfig.modelName} onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500">{AVAILABLE_MODELS.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select>
-                                </div>
-                             )}
-
-                             {modelConfig.provider === 'google_nmt' && (
-                                 <div className="space-y-3 bg-zinc-50 dark:bg-zinc-800/50 p-3 rounded-lg border border-zinc-100 dark:border-zinc-800">
-                                      <div>
-                                         <label className="text-xs font-semibold uppercase text-zinc-500">Google Cloud API Key</label>
-                                         <div className="flex gap-2">
-                                             <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Settings2 className="w-4 h-4"/></div>
-                                             <input aria-label="Google Cloud API Key" type="password" value={modelConfig.apiKey || ''} onChange={(e) => setModelConfig({...modelConfig, apiKey: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-yellow-500" placeholder="AIzaSy..." />
-                                         </div>
-                                         <p className="text-[10px] text-zinc-500 mt-1">Requires 'Cloud Translation API' enabled in Google Cloud Console.</p>
-                                      </div>
-                                 </div>
-                             )}
-
-                             {(modelConfig.provider === 'local' || modelConfig.provider === 'openai') && (
-                                <div className="space-y-3 bg-zinc-50 dark:bg-zinc-800/50 p-3 rounded-lg border border-zinc-100 dark:border-zinc-800">
-                                     <div>
-                                        <label className="text-xs font-semibold uppercase text-zinc-500">Endpoint URL</label>
-                                        <div className="flex gap-2">
-                                            <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Globe className="w-4 h-4"/></div>
-                                            <input aria-label="Endpoint URL" type="text" value={modelConfig.localEndpoint || ''} onChange={(e) => setModelConfig({...modelConfig, localEndpoint: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-yellow-500" placeholder="https://api.example.com/v1/..." />
-                                        </div>
-                                     </div>
-                                     <div>
-                                        <label className="text-xs font-semibold uppercase text-zinc-500">API Key</label>
-                                        <div className="flex gap-2">
-                                            <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Settings2 className="w-4 h-4"/></div>
-                                            <input aria-label="API Key" type="password" value={modelConfig.apiKey || ''} onChange={(e) => setModelConfig({...modelConfig, apiKey: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-yellow-500" placeholder="sk-..." />
-                                        </div>
-                                     </div>
-                                     
-                                     {modelConfig.provider === 'openai' ? (
-                                        <div>
-                                            <label className="text-xs font-semibold uppercase text-zinc-500 mb-1 block">Model Selection</label>
-                                            <select 
-                                                aria-label="Model Selection"
-                                                value={customModelMode ? 'custom' : modelConfig.modelName} 
-                                                onChange={handleOpenAIModelChange} 
-                                                className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500 mb-2"
-                                            >
-                                                <option value="" disabled>Select a model...</option>
-                                                {OPENAI_PRESETS.map((group) => (
-                                                    <optgroup key={group.label} label={group.label}>
-                                                        {group.options.map(opt => (
-                                                            <option key={opt.id} value={opt.id}>{opt.name}</option>
-                                                        ))}
-                                                    </optgroup>
-                                                ))}
-                                                <option value="custom">Custom / Other...</option>
-                                            </select>
-                                            
-                                            {customModelMode && (
-                                                <div className="flex gap-2 animate-in fade-in slide-in-from-top-1">
-                                                    <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Cpu className="w-4 h-4"/></div>
-                                                    <input 
-                                                        aria-label="Custom Model Name"
-                                                        type="text" 
-                                                        value={modelConfig.modelName} 
-                                                        onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} 
-                                                        className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500" 
-                                                        placeholder="Enter custom model ID (e.g. gpt-4-32k)" 
-                                                        autoFocus
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                     ) : (
-                                        <div>
-                                            <label className="text-xs font-semibold uppercase text-zinc-500">Model Name</label>
-                                            <div className="flex gap-2">
-                                                <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Cpu className="w-4 h-4"/></div>
-                                                <input aria-label="Model Name" type="text" value={modelConfig.modelName} onChange={(e) => setModelConfig({...modelConfig, modelName: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500" placeholder="e.g. llama3" />
-                                            </div>
-                                        </div>
-                                     )}
-                                </div>
-                             )}
-
-                             {/* Generation Parameters (Hidden for NMT) */}
-                             {modelConfig.provider !== 'google_nmt' && (
-                                <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-4">
-                                    <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider">Generation Parameters</h4>
-                                    
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="text-xs text-zinc-500 flex justify-between items-center mb-1">
-                                                <div className="flex items-center gap-1 relative group">
-                                                    <span>Temperature</span>
-                                                    <HelpCircle className="w-3 h-3 text-zinc-400 cursor-help" />
-                                                    <InfoTooltip text="Controls randomness. Lower values (e.g. 0.2) result in more deterministic and consistent translations. Higher values (e.g. 0.8) allow for more creative or varied output." />
-                                                </div>
-                                                <span className="font-mono">{modelConfig.temperature}</span>
-                                            </label>
-                                            <input aria-label="Temperature" type="range" min="0" max="2" step="0.1" value={modelConfig.temperature} onChange={(e) => setModelConfig({...modelConfig, temperature: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
-                                        </div>
-                                        <div>
-                                            <label className="text-xs text-zinc-500 flex justify-between items-center mb-1">
-                                                <div className="flex items-center gap-1 relative group">
-                                                    <span>Top P</span>
-                                                    <HelpCircle className="w-3 h-3 text-zinc-400 cursor-help" />
-                                                    <InfoTooltip text="Nucleus sampling. Limits the model to the top P percentage of probability mass. Lower values (e.g. 0.5) limit vocabulary to the most likely words. Higher values (e.g. 0.95) allow for a wider vocabulary range." />
-                                                </div>
-                                                <span className="font-mono">{modelConfig.topP}</span>
-                                            </label>
-                                            <input aria-label="Top P" type="range" min="0" max="1" step="0.05" value={modelConfig.topP} onChange={(e) => setModelConfig({...modelConfig, topP: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
-                                        </div>
-                                    </div>
-                                    
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="text-xs text-zinc-500 block mb-1 flex items-center gap-1 relative group w-fit">
-                                                Max Output Tokens
-                                                <HelpCircle className="w-3 h-3 text-zinc-400 cursor-help" />
-                                                <InfoTooltip text="The maximum number of tokens the model can generate in a single response. Higher values are safer for large batches of subtitles to prevent cutoff." />
-                                            </label>
-                                            <input aria-label="Max Output Tokens" type="number" value={modelConfig.maxOutputTokens} onChange={(e) => setModelConfig({...modelConfig, maxOutputTokens: parseInt(e.target.value)})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500" />
-                                        </div>
-                                    </div>
-                                </div>
-                             )}
-                             
-                             <div className="flex flex-col justify-end pt-2">
-                                <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-100 dark:bg-zinc-800">
-                                    <div className="flex-1">
-                                        <div className="text-xs font-semibold">Simulation Mode</div>
-                                        <div className="text-[10px] text-zinc-500">Mock API calls (Free)</div>
-                                    </div>
-                                    <button aria-label="Toggle Simulation Mode" aria-pressed={modelConfig.useSimulation} onClick={() => setModelConfig({...modelConfig, useSimulation: !modelConfig.useSimulation})} className={`w-9 h-5 rounded-full transition-colors relative ${modelConfig.useSimulation ? 'bg-purple-600' : 'bg-zinc-300 dark:bg-zinc-600'}`}>
-                                        <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${modelConfig.useSimulation ? 'left-4.5' : 'left-0.5'}`} />
-                                    </button>
-                                </div>
-                            </div>
-
-                        </div>
-                        <button onClick={() => setShowModelSettings(false)} className="w-full py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg font-bold hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors">Apply Settings</button>
-                    </div>
-                </div>
-            )}
+            <ModelSettings 
+                isOpen={showModelSettings}
+                onClose={() => setShowModelSettings(false)}
+                config={modelConfig}
+                onConfigChange={setModelConfig}
+                customModelMode={customModelMode}
+                onProviderChange={handleProviderChange}
+                onOpenAIModelChange={handleOpenAIModelChange}
+            />
       </main>
     </div>
   );
@@ -1604,7 +412,11 @@ function DualSubApp() {
 function App() {
   return (
     <ToastProvider>
-      <DualSubApp />
+      <SettingsProvider>
+        <BatchProvider>
+          <DualSubAppContent />
+        </BatchProvider>
+      </SettingsProvider>
     </ToastProvider>
   );
 }

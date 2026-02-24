@@ -54,7 +54,7 @@ export interface LogEntry {
     timestamp: number;
     type: 'info' | 'request' | 'response' | 'error';
     message: string;
-    data?: any;
+    data?: unknown;
 }
 
 export interface BatchItem {

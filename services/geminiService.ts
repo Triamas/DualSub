@@ -24,7 +24,7 @@ const LANGUAGE_CODES: Record<string, string> = {
  * Wrapper to enforce a timeout on promises.
  */
 const callWithTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
-    let timeoutHandle: any;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => reject(new Error("REQUEST_TIMEOUT")), timeoutMs);
     });
@@ -59,6 +59,28 @@ const parseJSONResponse = (text: string): Record<string, string> => {
     }
 };
 
+interface GoogleNMTResponse {
+    data?: {
+        translations?: Array<{
+            translatedText: string;
+        }>;
+    };
+    error?: {
+        message?: string;
+    };
+}
+
+interface OpenAIResponse {
+    choices?: Array<{
+        message?: {
+            content?: string;
+        };
+    }>;
+    error?: {
+        message?: string;
+    };
+}
+
 /**
  * Calls Google Cloud Translation API (Basic v2)
  */
@@ -81,13 +103,13 @@ const translateWithGoogleNMT = async (
     });
 
     if (!response.ok) {
-        const err = await response.json();
+        const err = await response.json() as GoogleNMTResponse;
         throw new Error(`Google Translate API Error: ${err.error?.message || response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as GoogleNMTResponse;
     if (data.data && data.data.translations) {
-        return data.data.translations.map((t: any) => t.translatedText);
+        return data.data.translations.map(t => t.translatedText);
     }
     return [];
 };
@@ -140,11 +162,12 @@ const generateOpenAICompatibleContent = async (config: ModelConfig, prompt: stri
             throw new Error(`${config.provider} API Error: ${response.status} - ${errText}`);
         }
 
-        const data = await response.json();
+        const data = await response.json() as OpenAIResponse;
         return data.choices?.[0]?.message?.content || "";
-    } catch (e: any) {
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
         console.error(`${config.provider} API Call Failed`, e);
-        throw new Error(`${config.provider} Connection Failed: ${e.message}`);
+        throw new Error(`${config.provider} Connection Failed: ${message}`);
     }
 };
 
@@ -172,7 +195,7 @@ const queryAI = async (
         if (prompt.includes("TASK: JSON-to-JSON")) {
              // Extract IDs roughly
              const ids: string[] = prompt.match(/"id_\d+"/g) || [];
-             const mockObj: any = {};
+             const mockObj: Record<string, string> = {};
              ids.forEach(id => {
                  mockObj[id.replace(/"/g, '')] = "[SIMULATED TRANSLATION]";
              });
@@ -209,10 +232,11 @@ const queryAI = async (
         }), 45000);
         
         return response.text || "";
-    } catch (e: any) {
+    } catch (e) {
         // Standard Gemini Error Handling
-        const status = e.status;
-        const msg = e.message?.toLowerCase() || "";
+        const err = e as { status?: number; message?: string };
+        const status = err.status;
+        const msg = err.message?.toLowerCase() || "";
 
         if (status === 400 || status === 401 || status === 403) {
             throw new Error(`TERMINAL: API Key Invalid or Permission Denied (${status})`);
@@ -409,7 +433,7 @@ export const translateBatch = async (
   },
   _durations: Map<number, number> = new Map(),
   showBible: string = "",
-  onLog?: (message: string, type: 'info' | 'request' | 'response' | 'error', data?: any) => void
+  onLog?: (message: string, type: 'info' | 'request' | 'response' | 'error', data?: unknown) => void
 ): Promise<Map<number, string>> => {
 
   const performTranslation = async (linesToProcess: SubtitleLine[], _isRetry: boolean): Promise<Map<number, string>> => {
@@ -442,8 +466,9 @@ export const translateBatch = async (
               });
               if (onLog) onLog(`Received NMT Response`, 'response', translations);
               return resultMap;
-          } catch (e: any) {
-              if (onLog) onLog(`NMT Failed`, 'error', e.message);
+          } catch (e) {
+              const message = e instanceof Error ? e.message : String(e);
+              if (onLog) onLog(`NMT Failed`, 'error', message);
               throw e;
           }
       }
@@ -515,8 +540,9 @@ RESPONSE (JSON ONLY):`;
 
         return resultMap;
 
-      } catch (error: any) {
-        if (onLog) onLog(`Batch Failed`, 'error', error.message || error);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (onLog) onLog(`Batch Failed`, 'error', message);
         console.error("Translation error:", error);
         throw error; 
       }
