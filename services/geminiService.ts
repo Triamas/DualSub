@@ -81,6 +81,54 @@ interface OpenAIResponse {
     };
 }
 
+
+export class GeminiAPIError extends Error {
+    constructor(message: string, public status?: number, public code?: string) {
+        super(message);
+        this.name = "GeminiAPIError";
+    }
+}
+
+const handleAPIError = (error: unknown, provider: string): never => {
+    let message = "Unknown Error";
+    let status: number | undefined;
+
+    if (error instanceof Error) {
+        message = error.message;
+    } else if (typeof error === 'string') {
+        message = error;
+    }
+
+    // Handle specific Gemini/Google GenAI error structures
+    const errObj = error as { status?: number; message?: string; response?: { status?: number } };
+    if (errObj.status) {
+        status = errObj.status;
+    } else if (errObj.response?.status) {
+        status = errObj.response.status;
+    }
+
+    const lowerMsg = message.toLowerCase();
+
+    if (status === 400 || status === 401 || status === 403 || lowerMsg.includes("api key not found")) {
+        throw new GeminiAPIError(`TERMINAL: API Key Invalid or Permission Denied (${status || 'Config'})`, status, "AUTH_ERROR");
+    }
+    if (lowerMsg.includes("quota") || lowerMsg.includes("exhausted") || lowerMsg.includes("billing") || status === 429) {
+        throw new GeminiAPIError(`TERMINAL: Quota Exceeded. Check your API billing.`, status, "QUOTA_EXCEEDED");
+    }
+    if (lowerMsg.includes("timeout") || message === "REQUEST_TIMEOUT") {
+        throw new GeminiAPIError(`${provider} Request Timed Out`, status, "TIMEOUT");
+    }
+    if (lowerMsg.includes("fetch failed") || lowerMsg.includes("network") || lowerMsg.includes("connection refused")) {
+        throw new GeminiAPIError(`${provider} Network Connection Failed`, status, "NETWORK_ERROR");
+    }
+    if (lowerMsg.includes("terminal")) {
+         // Pass through existing terminal errors
+         throw new GeminiAPIError(message, status, "TERMINAL_ERROR");
+    }
+
+    throw new GeminiAPIError(`${provider} Error: ${message}`, status, "GENERIC_ERROR");
+};
+
 /**
  * Calls Google Cloud Translation API (Basic v2)
  */
@@ -92,26 +140,30 @@ const translateWithGoogleNMT = async (
     const targetCode = LANGUAGE_CODES[targetLang] || 'en';
     const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
 
-    const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            q: texts,
-            target: targetCode,
-            format: "text" // Use 'text' to prevent HTML escaping of regular chars, but 'html' if tags exist
-        })
-    });
+    try {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                q: texts,
+                target: targetCode,
+                format: "text" // Use 'text' to prevent HTML escaping of regular chars, but 'html' if tags exist
+            })
+        });
 
-    if (!response.ok) {
-        const err = await response.json() as GoogleNMTResponse;
-        throw new Error(`Google Translate API Error: ${err.error?.message || response.statusText}`);
-    }
+        if (!response.ok) {
+            const err = await response.json() as GoogleNMTResponse;
+            throw new Error(`Google Translate API Error: ${err.error?.message || response.statusText}`);
+        }
 
-    const data = await response.json() as GoogleNMTResponse;
-    if (data.data && data.data.translations) {
-        return data.data.translations.map(t => t.translatedText);
+        const data = await response.json() as GoogleNMTResponse;
+        if (data.data && data.data.translations) {
+            return data.data.translations.map(t => t.translatedText);
+        }
+        return [];
+    } catch (e) {
+        return handleAPIError(e, "Google NMT");
     }
-    return [];
 };
 
 /**
@@ -125,7 +177,7 @@ const generateOpenAICompatibleContent = async (config: ModelConfig, prompt: stri
         else if (config.provider === 'openai') endpoint = 'https://api.openai.com/v1/chat/completions';
     }
 
-    if (!endpoint) throw new Error("Endpoint is required for this provider.");
+    if (!endpoint) throw new GeminiAPIError("Endpoint is required for this provider.", undefined, "CONFIG_ERROR");
 
     // Fallback model name
     const model = config.modelName || 'local-model';
@@ -165,9 +217,7 @@ const generateOpenAICompatibleContent = async (config: ModelConfig, prompt: stri
         const data = await response.json() as OpenAIResponse;
         return data.choices?.[0]?.message?.content || "";
     } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        console.error(`${config.provider} API Call Failed`, e);
-        throw new Error(`${config.provider} Connection Failed: ${message}`);
+        return handleAPIError(e, config.provider);
     }
 };
 
@@ -206,12 +256,16 @@ const queryAI = async (
 
     // 2. Google NMT Guard
     if (config.provider === 'google_nmt') {
-        throw new Error("Generative Context/Bible features are not available when using Google Translate (NMT). Switch to an LLM provider (Gemini/OpenAI) to use these features.");
+        throw new GeminiAPIError("Generative Context/Bible features are not available when using Google Translate (NMT). Switch to an LLM provider (Gemini/OpenAI) to use these features.", undefined, "FEATURE_NOT_SUPPORTED");
     }
 
     // 3. OpenAI Compatible Providers (Local, Custom)
     if (config.provider === 'local' || config.provider === 'openai') {
-        return await callWithTimeout(generateOpenAICompatibleContent(config, prompt, systemInstruction), 120000); 
+        try {
+            return await callWithTimeout(generateOpenAICompatibleContent(config, prompt, systemInstruction), 120000); 
+        } catch (e) {
+            handleAPIError(e, config.provider);
+        }
     }
 
     // 4. Gemini (Cloud)
@@ -233,18 +287,7 @@ const queryAI = async (
         
         return response.text || "";
     } catch (e) {
-        // Standard Gemini Error Handling
-        const err = e as { status?: number; message?: string };
-        const status = err.status;
-        const msg = err.message?.toLowerCase() || "";
-
-        if (status === 400 || status === 401 || status === 403) {
-            throw new Error(`TERMINAL: API Key Invalid or Permission Denied (${status})`);
-        }
-        if (msg.includes("quota") || msg.includes("exhausted") || msg.includes("billing")) {
-            throw new Error(`TERMINAL: Quota Exceeded. Check your API billing.`);
-        }
-        throw e;
+        return handleAPIError(e, "Gemini");
     }
 };
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Palette, Layout, ArrowUp, ArrowDown, Type, Eye, Settings2 } from 'lucide-react';
+import { Palette, Layout, ArrowUp, ArrowDown, Type, Eye } from 'lucide-react';
 import { AssStyleConfig } from '../types';
 import { STYLE_PRESETS } from '../services/subtitleUtils';
 import { KODI_FONTS } from '../constants';
@@ -30,20 +30,30 @@ export const StyleEditor = React.memo<StyleEditorProps>(({
     sampleTranslated,
     selectedSubtitleId
 }) => {
+    // Local state for immediate preview updates
+    const [localConfig, setLocalConfig] = React.useState(config);
+    
+    // Sync local state when prop changes (e.g. reset or preset applied)
+    React.useEffect(() => {
+        setLocalConfig(config);
+    }, [config]);
+
+    // Debounce updates to parent
+    React.useEffect(() => {
+        const timer = setTimeout(() => {
+            if (JSON.stringify(localConfig) !== JSON.stringify(config)) {
+                onChange(localConfig);
+            }
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [localConfig, onChange, config]);
+
+    const handleLocalChange = (newConfig: AssStyleConfig) => {
+        setLocalConfig(newConfig);
+    };
+
     return (
         <>
-            <div className="flex justify-end mb-4">
-                 <button 
-                    onClick={onToggle}
-                    aria-label="Open style settings"
-                    aria-expanded={isOpen}
-                    className={`px-4 py-2 rounded-xl transition-all border flex items-center gap-2 ${isOpen ? 'bg-zinc-200 dark:bg-zinc-200 text-black border-zinc-300' : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-500'}`}
-                >
-                    <Settings2 className="w-5 h-5" />
-                    <span className="text-sm font-medium">Style Editor</span>
-                </button>
-            </div>
-
             {isOpen && (
                 <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-2xl animate-in fade-in slide-in-from-top-4 mb-6">
                     
@@ -77,24 +87,24 @@ export const StyleEditor = React.memo<StyleEditorProps>(({
                                 <div>
                                     <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Export Format</label>
                                     <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                            <button onClick={() => onChange({...config, outputFormat: 'ass'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${config.outputFormat === 'ass' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>ASS (Styled)</button>
-                                            <button onClick={() => onChange({...config, outputFormat: 'srt'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${config.outputFormat === 'srt' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>SRT (Simple)</button>
+                                            <button onClick={() => handleLocalChange({...localConfig, outputFormat: 'ass'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${localConfig.outputFormat === 'ass' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>ASS (Styled)</button>
+                                            <button onClick={() => handleLocalChange({...localConfig, outputFormat: 'srt'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${localConfig.outputFormat === 'srt' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>SRT (Simple)</button>
                                     </div>
                                 </div>
                                 <div>
                                     <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Positioning</label>
                                     <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                            <button onClick={() => onChange({...config, layout: 'stacked'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${config.layout === 'stacked' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>Stacked</button>
-                                            <button onClick={() => onChange({...config, layout: 'split'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${config.layout === 'split' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>Split</button>
+                                            <button onClick={() => handleLocalChange({...localConfig, layout: 'stacked'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${localConfig.layout === 'stacked' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>Stacked</button>
+                                            <button onClick={() => handleLocalChange({...localConfig, layout: 'split'})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${localConfig.layout === 'split' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>Split</button>
                                     </div>
                                 </div>
                                 <div className="md:col-span-2">
                                     <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Top Line Language</label>
                                     <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                            <button onClick={() => onChange({...config, stackOrder: 'primary-top'})} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-2 ${config.stackOrder === 'primary-top' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>
+                                            <button onClick={() => handleLocalChange({...localConfig, stackOrder: 'primary-top'})} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-2 ${localConfig.stackOrder === 'primary-top' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>
                                             <ArrowUp className="w-3 h-3" /> {targetLang} (Translated)
                                             </button>
-                                            <button onClick={() => onChange({...config, stackOrder: 'secondary-top'})} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-2 ${config.stackOrder === 'secondary-top' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>
+                                            <button onClick={() => handleLocalChange({...localConfig, stackOrder: 'secondary-top'})} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-2 ${localConfig.stackOrder === 'secondary-top' ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500 hover:text-zinc-900'}`}>
                                             <ArrowDown className="w-3 h-3" /> English (Source)
                                             </button>
                                     </div>
@@ -114,18 +124,18 @@ export const StyleEditor = React.memo<StyleEditorProps>(({
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div className="md:col-span-1">
                                     <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Font Family</label>
-                                    <select aria-label="Font Family" value={config.fontFamily} onChange={e => onChange({...config, fontFamily: e.target.value})} className="w-full text-xs font-bold p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:border-yellow-500 transition-colors">
+                                    <select aria-label="Font Family" value={localConfig.fontFamily} onChange={e => handleLocalChange({...localConfig, fontFamily: e.target.value})} className="w-full text-xs font-bold p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:outline-none focus:border-yellow-500 transition-colors">
                                         {KODI_FONTS.map(f => <option key={f} value={f}>{f}</option>)}
                                     </select>
                                 </div>
                                 <div className="md:col-span-2 grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Outline</span> <span>{config.outlineWidth}px</span></label>
-                                        <input aria-label="Outline width" type="range" min="0" max="10" step="0.5" value={config.outlineWidth} onChange={e => onChange({...config, outlineWidth: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
+                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Outline</span> <span>{localConfig.outlineWidth}px</span></label>
+                                        <input aria-label="Outline width" type="range" min="0" max="10" step="0.5" value={localConfig.outlineWidth} onChange={e => handleLocalChange({...localConfig, outlineWidth: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
                                     </div>
                                     <div>
-                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Shadow</span> <span>{config.shadowDepth}px</span></label>
-                                        <input aria-label="Shadow depth" type="range" min="0" max="10" step="0.5" value={config.shadowDepth} onChange={e => onChange({...config, shadowDepth: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
+                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Shadow</span> <span>{localConfig.shadowDepth}px</span></label>
+                                        <input aria-label="Shadow depth" type="range" min="0" max="10" step="0.5" value={localConfig.shadowDepth} onChange={e => handleLocalChange({...localConfig, shadowDepth: parseFloat(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
                                     </div>
                                 </div>
                             </div>
@@ -134,29 +144,29 @@ export const StyleEditor = React.memo<StyleEditorProps>(({
                                 <div>
                                     <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Background Style</label>
                                     <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                        <button onClick={() => onChange({...config, borderStyle: 1})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${config.borderStyle === 1 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Outline</button>
-                                        <button onClick={() => onChange({...config, borderStyle: 3})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${config.borderStyle === 3 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Box</button>
+                                        <button onClick={() => handleLocalChange({...localConfig, borderStyle: 1})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${localConfig.borderStyle === 1 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Outline</button>
+                                        <button onClick={() => handleLocalChange({...localConfig, borderStyle: 3})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${localConfig.borderStyle === 3 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Box</button>
                                     </div>
                                 </div>
                                 <div>
                                     <label className="text-xs font-medium text-zinc-500 mb-1.5 block">Subtitle Lines</label>
                                     <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-lg">
-                                        <button onClick={() => onChange({...config, linesPerSubtitle: 2})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${(config.linesPerSubtitle ?? 2) === 2 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Multi-line</button>
-                                        <button onClick={() => onChange({...config, linesPerSubtitle: 1})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${config.linesPerSubtitle === 1 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Single Line</button>
+                                        <button onClick={() => handleLocalChange({...localConfig, linesPerSubtitle: 2})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${(localConfig.linesPerSubtitle ?? 2) === 2 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Multi-line</button>
+                                        <button onClick={() => handleLocalChange({...localConfig, linesPerSubtitle: 1})} className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${localConfig.linesPerSubtitle === 1 ? 'bg-white dark:bg-zinc-600 shadow-sm text-black dark:text-white' : 'text-zinc-500'}`}>Single Line</button>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Vertical Positioning Controls */}
-                            {config.layout === 'stacked' && (
+                            {localConfig.layout === 'stacked' && (
                                 <div className="grid grid-cols-2 gap-4 pt-2 border-t border-zinc-100 dark:border-zinc-800">
                                     <div>
-                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Bottom Spacing</span> <span>{config.screenPadding ?? 50}px</span></label>
-                                        <input aria-label="Bottom Spacing" type="range" min="0" max="200" step="5" value={config.screenPadding ?? 50} onChange={e => onChange({...config, screenPadding: parseInt(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
+                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Bottom Spacing</span> <span>{localConfig.screenPadding ?? 50}px</span></label>
+                                        <input aria-label="Bottom Spacing" type="range" min="0" max="200" step="5" value={localConfig.screenPadding ?? 50} onChange={e => handleLocalChange({...localConfig, screenPadding: parseInt(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
                                     </div>
                                     <div>
-                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Vertical Gap</span> <span>{config.verticalGap ?? 15}px</span></label>
-                                        <input aria-label="Vertical Gap" type="range" min="0" max="100" step="1" value={config.verticalGap ?? 15} onChange={e => onChange({...config, verticalGap: parseInt(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
+                                        <label className="text-xs font-medium text-zinc-500 mb-1.5 flex justify-between"><span>Vertical Gap</span> <span>{localConfig.verticalGap ?? 15}px</span></label>
+                                        <input aria-label="Vertical Gap" type="range" min="0" max="100" step="1" value={localConfig.verticalGap ?? 15} onChange={e => handleLocalChange({...localConfig, verticalGap: parseInt(e.target.value)})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-zinc-900 dark:accent-zinc-100" />
                                     </div>
                                 </div>
                             )}
@@ -173,7 +183,7 @@ export const StyleEditor = React.memo<StyleEditorProps>(({
                                 </p>
                              </div>
                             <VisualPreview 
-                                config={config} 
+                                config={localConfig} 
                                 original={sampleOriginal} 
                                 translated={sampleTranslated} 
                                 isSample={false}
@@ -189,13 +199,13 @@ export const StyleEditor = React.memo<StyleEditorProps>(({
                                 <div className="flex items-center justify-between mb-3">
                                     <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Original Text</label>
                                     <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-mono text-zinc-400">{config.secondary.color}</span>
-                                        <input aria-label="Original text color" type="color" value={config.secondary.color} onChange={e => onChange({...config, secondary: {...config.secondary, color: e.target.value}})} className="w-6 h-6 rounded cursor-pointer border-0 p-0 overflow-hidden" />
+                                        <span className="text-[10px] font-mono text-zinc-400">{localConfig.secondary.color}</span>
+                                        <input aria-label="Original text color" type="color" value={localConfig.secondary.color} onChange={e => handleLocalChange({...localConfig, secondary: {...localConfig.secondary, color: e.target.value}})} className="w-6 h-6 rounded cursor-pointer border-0 p-0 overflow-hidden" />
                                     </div>
                                 </div>
                                     <div>
-                                    <label className="text-[10px] text-zinc-400 mb-1 block flex justify-between"><span>Size</span> <span>{config.secondary.fontSize}px</span></label>
-                                    <input aria-label="Original text size" type="range" min="10" max="100" value={config.secondary.fontSize} onChange={e => onChange({...config, secondary: {...config.secondary, fontSize: parseInt(e.target.value)}})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+                                    <label className="text-[10px] text-zinc-400 mb-1 block flex justify-between"><span>Size</span> <span>{localConfig.secondary.fontSize}px</span></label>
+                                    <input aria-label="Original text size" type="range" min="10" max="100" value={localConfig.secondary.fontSize} onChange={e => handleLocalChange({...localConfig, secondary: {...localConfig.secondary, fontSize: parseInt(e.target.value)}})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
                                 </div>
                             </div>
 
@@ -204,13 +214,13 @@ export const StyleEditor = React.memo<StyleEditorProps>(({
                                 <div className="flex items-center justify-between mb-3">
                                     <label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Translated Text</label>
                                     <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-mono text-zinc-400">{config.primary.color}</span>
-                                        <input aria-label="Translated text color" type="color" value={config.primary.color} onChange={e => onChange({...config, primary: {...config.primary, color: e.target.value}})} className="w-6 h-6 rounded cursor-pointer border-0 p-0 overflow-hidden" />
+                                        <span className="text-[10px] font-mono text-zinc-400">{localConfig.primary.color}</span>
+                                        <input aria-label="Translated text color" type="color" value={localConfig.primary.color} onChange={e => handleLocalChange({...localConfig, primary: {...localConfig.primary, color: e.target.value}})} className="w-6 h-6 rounded cursor-pointer border-0 p-0 overflow-hidden" />
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="text-[10px] text-zinc-400 mb-1 block flex justify-between"><span>Size</span> <span>{config.primary.fontSize}px</span></label>
-                                    <input aria-label="Translated text size" type="range" min="10" max="100" value={config.primary.fontSize} onChange={e => onChange({...config, primary: {...config.primary, fontSize: parseInt(e.target.value)}})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                                    <label className="text-[10px] text-zinc-400 mb-1 block flex justify-between"><span>Size</span> <span>{localConfig.primary.fontSize}px</span></label>
+                                    <input aria-label="Translated text size" type="range" min="10" max="100" value={localConfig.primary.fontSize} onChange={e => handleLocalChange({...localConfig, primary: {...localConfig.primary, fontSize: parseInt(e.target.value)}})} className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
                                 </div>
                             </div>
                         </div>

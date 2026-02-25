@@ -39,31 +39,32 @@ The `mergeAndOptimizeSubtitles` function uses Dynamic Time Warping (DTW), which 
 
 ## 3. Code Quality & Safety
 
-### **Type Safety**
+### **Type Safety** COMPLETED
 - **Action**: Stricter typing for `any` types in `services/geminiService.ts` (e.g., error handling blocks).
 - **Action**: Define explicit return types for all service functions.
 
-### **Error Handling**
+### **Error Handling** COMPLETED
 - **Action**: Implement a global Error Boundary component to catch crashes.
 - **Action**: Centralize API error handling in `geminiService` to provide consistent user feedback (e.g., specific messages for "Quota Exceeded" vs "Network Error").
 
-### **Testing**
+### **Testing** COMPLETED
 - **Action**: Add unit tests for `subtitleUtils.ts` (especially the parser and merger logic) using Vitest.
 - **Action**: Add integration tests for the translation flow.
 
 ## 4. User Experience (UX)
 
-### **Optimistic UI**
+### **Optimistic UI** COMPLETED
 - **Action**: When changing styles, apply them immediately in the preview without waiting for a full re-render of the parent.
 
-### **Accessibility (a11y)**
+### **Accessibility (a11y)** COMPLETED
 - **Action**: Ensure all form inputs in the settings modal have associated `<label>` elements (some are currently implicit or missing `htmlFor`).
 - **Action**: Verify keyboard navigation focus traps for the Modal.
 
 ## 5. Build & Infrastructure
 
-### **Environment Variables**
+### **Environment Variables** COMPLETED
 - **Action**: Ensure all API keys and sensitive config are strictly handled via `import.meta.env` and not hardcoded defaults (except for local dev fallbacks).
 
-### **Bundle Size**
+### **Bundle Size** COMPLETED
 - **Action**: Analyze bundle size. If `lucide-react` is importing too many icons, ensure tree-shaking is working correctly.
+- **Result**: Split vendor chunks (React, GenAI, Utils) to reduce main bundle size from ~900KB to ~150KB. Tree-shaking confirmed working for `lucide-react` (only ~17KB used).

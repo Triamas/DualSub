@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Virtuoso } from 'react-virtuoso';
-import { BatchItem } from '../types';
+import { BatchItem, SubtitleLine } from '../types';
 
 interface SubtitleEditorProps {
     activeItem: BatchItem | undefined;
@@ -8,11 +8,58 @@ interface SubtitleEditorProps {
     setPreviewLineId: (id: number | null) => void;
 }
 
+interface RowContext {
+    previewLineId: number | null;
+    setPreviewLineId: (id: number | null) => void;
+}
+
+const SubtitleRow = React.memo(({ sub, isSelected, onClick }: { sub: SubtitleLine, isSelected: boolean, onClick: () => void }) => {
+    return (
+        <div 
+            id={`sub-${sub.id}`}
+            onClick={onClick}
+            className={`grid grid-cols-[80px_80px_1fr_1fr] gap-4 px-4 py-2 border-b border-zinc-100 dark:border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 items-start ${isSelected ? 'bg-yellow-50 dark:bg-yellow-500/10' : ''}`}
+            role="row"
+            aria-selected={isSelected}
+            tabIndex={0}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onClick();
+                }
+            }}
+        >
+            <div className="font-mono text-xs text-zinc-400 pt-0.5">{sub.startTime.split(',')[0]}</div>
+            <div className="font-mono text-xs text-zinc-400 pt-0.5">{sub.endTime.split(',')[0]}</div>
+            <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-tight">{sub.originalText}</div>
+            <div className={`text-xs leading-tight font-medium ${sub.translatedText ? 'text-zinc-900 dark:text-zinc-200' : 'text-zinc-300 dark:text-zinc-700 italic'}`}>
+                {sub.translatedText || '-'}
+            </div>
+        </div>
+    );
+}, (prevProps, nextProps) => {
+    return (
+        prevProps.isSelected === nextProps.isSelected &&
+        prevProps.sub === nextProps.sub
+    );
+});
+
 export const SubtitleEditor = React.memo<SubtitleEditorProps>(({
     activeItem,
     previewLineId,
     setPreviewLineId
 }) => {
+    
+    const itemContent = useCallback((_index: number, sub: SubtitleLine, context: RowContext) => {
+        return (
+            <SubtitleRow 
+                sub={sub} 
+                isSelected={context.previewLineId === sub.id} 
+                onClick={() => context.setPreviewLineId(sub.id)} 
+            />
+        );
+    }, []);
+
     if (!activeItem) return null;
 
     return (
@@ -29,32 +76,11 @@ export const SubtitleEditor = React.memo<SubtitleEditorProps>(({
                 <div>Target</div>
             </div>
             <div className="flex-1 min-h-0">
-                <Virtuoso
+                <Virtuoso<SubtitleLine, RowContext>
                     style={{ height: '100%' }}
                     data={activeItem.subtitles}
-                    itemContent={(_, sub) => (
-                        <div 
-                            key={sub.id} 
-                            id={`sub-${sub.id}`}
-                            onClick={() => setPreviewLineId(sub.id)}
-                            className={`grid grid-cols-[80px_80px_1fr_1fr] gap-4 px-4 py-2 border-b border-zinc-100 dark:border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 items-start ${previewLineId === sub.id ? 'bg-yellow-50 dark:bg-yellow-500/10' : ''}`}
-                            role="row"
-                            aria-selected={previewLineId === sub.id}
-                            tabIndex={0}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                    setPreviewLineId(sub.id);
-                                }
-                            }}
-                        >
-                            <div className="font-mono text-xs text-zinc-400 pt-0.5">{sub.startTime.split(',')[0]}</div>
-                            <div className="font-mono text-xs text-zinc-400 pt-0.5">{sub.endTime.split(',')[0]}</div>
-                            <div className="text-xs text-zinc-600 dark:text-zinc-400 leading-tight">{sub.originalText}</div>
-                            <div className={`text-xs leading-tight font-medium ${sub.translatedText ? 'text-zinc-900 dark:text-zinc-200' : 'text-zinc-300 dark:text-zinc-700 italic'}`}>
-                                {sub.translatedText || '-'}
-                            </div>
-                        </div>
-                    )}
+                    context={{ previewLineId, setPreviewLineId }}
+                    itemContent={itemContent}
                 />
             </div>
         </div>

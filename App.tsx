@@ -126,7 +126,6 @@ function DualSubAppContent() {
 
 
   const completedCount = batchItems.filter(i => i.status === 'completed').length;
-  const getDownloadLabel = () => completedCount === 1 ? `Download` : `Download All (${completedCount})`;
   
   // Set default configurations when switching providers
   const handleProviderChange = (provider: ModelConfig['provider']) => {
@@ -138,7 +137,7 @@ function DualSubAppContent() {
       } else if (provider === 'google_nmt') {
           // Reset NMT config
           newConfig.modelName = 'google_nmt';
-          newConfig.apiKey = ''; // Requires user input
+          newConfig.apiKey = import.meta.env.VITE_GOOGLE_CLOUD_API_KEY || ''; 
           
           // NMT doesn't support context features
           if (autoContext || autoBible) {
@@ -150,11 +149,12 @@ function DualSubAppContent() {
       } else if (provider === 'local') {
           newConfig.modelName = 'llama3';
           newConfig.localEndpoint = 'http://127.0.0.1:8080/v1/chat/completions';
-          newConfig.apiKey = '';
+          newConfig.apiKey = import.meta.env.VITE_LOCAL_LLM_API_KEY || '';
       } else {
           // Generic OpenAI
           newConfig.modelName = 'gpt-4o';
           newConfig.localEndpoint = 'https://api.openai.com/v1/chat/completions';
+          newConfig.apiKey = import.meta.env.VITE_OPENAI_API_KEY || '';
       }
       setModelConfig(newConfig);
       addToast(`Switched provider to ${provider}`, 'info');
@@ -274,58 +274,71 @@ function DualSubAppContent() {
                             </div>
 
                             {/* Main Actions */}
-                            <div className="flex gap-4">
+                            <div className="flex gap-3 h-20">
+                                {/* Translate Button */}
                                 <button 
                                     onClick={handleTranslateAll}
                                     disabled={isTranslatingRef.current}
-                                    className={`flex-[2] py-4 px-6 rounded-2xl font-bold text-lg shadow-xl shadow-yellow-500/20 hover:shadow-yellow-500/40 transform hover:-translate-y-0.5 transition-all flex items-center justify-center gap-3 ${isTranslatingRef.current ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed' : 'bg-yellow-500 text-black hover:bg-yellow-400'}`}
+                                    className={`flex-[1.5] rounded-2xl font-bold text-lg shadow-xl shadow-yellow-500/20 hover:shadow-yellow-500/40 transform hover:-translate-y-0.5 transition-all flex items-center justify-center gap-3 ${isTranslatingRef.current ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed' : 'bg-yellow-500 text-black hover:bg-yellow-400'}`}
                                 >
                                     {isTranslatingRef.current ? (
                                         <><RefreshCw className="w-6 h-6 animate-spin" /> Translating...</>
                                     ) : (
-                                        <><Sparkles className="w-6 h-6" /> Translate All</>
+                                        <><Sparkles className="w-6 h-6" /> Translate</>
                                     )}
                                 </button>
                                 
-                                <div className="flex-1 flex gap-2">
-                                     {/* Merge Translation Button */}
-                                    <div className="relative flex-1 group">
-                                        <button 
-                                            className={`w-full h-full rounded-xl border font-medium flex flex-col items-center justify-center gap-1 transition-all ${
-                                                !activeItemId 
-                                                ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-400 cursor-not-allowed' 
-                                                : 'bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
-                                            }`}
-                                            disabled={!activeItemId}
-                                            aria-label={!activeItemId ? "Select a file to merge translation" : "Merge existing translation"}
-                                        >
-                                            <FileInput className="w-5 h-5" />
-                                            <span className="text-xs">Merge Translation</span>
-                                        </button>
-                                        <input 
-                                            type="file" 
-                                            accept=".srt,.ass,.ssa,.vtt" 
-                                            onChange={handleImportTranslation}
-                                            disabled={!activeItemId}
-                                            className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
-                                            title={!activeItemId ? "Select a file first" : "Import translation file"}
-                                        />
-                                        {!activeItemId && (
-                                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2 py-1 bg-zinc-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                                                Select a file first
-                                            </div>
-                                        )}
-                                    </div>
-
+                                {/* Merge Button */}
+                                <div className="relative flex-1 group h-full">
                                     <button 
-                                        onClick={handleDownloadAll}
-                                        disabled={completedCount === 0}
-                                        className="flex-1 py-3 px-4 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className={`w-full h-full rounded-xl border font-medium flex flex-col items-center justify-center gap-1 transition-all ${
+                                            !activeItemId 
+                                            ? 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-400 cursor-not-allowed' 
+                                            : 'bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                                        }`}
+                                        disabled={!activeItemId}
+                                        aria-label={!activeItemId ? "Select a file to merge translation" : "Merge existing translation"}
                                     >
-                                        <DownloadIcon className="w-4 h-4" /> 
-                                        {getDownloadLabel()}
+                                        <FileInput className="w-5 h-5" />
+                                        <span className="text-xs">Merge</span>
                                     </button>
+                                    <input 
+                                        type="file" 
+                                        accept=".srt,.ass,.ssa,.vtt" 
+                                        onChange={handleImportTranslation}
+                                        disabled={!activeItemId}
+                                        className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                                        title={!activeItemId ? "Select a file first" : "Import translation file"}
+                                    />
+                                    {!activeItemId && (
+                                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2 py-1 bg-zinc-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                            Select a file first
+                                        </div>
+                                    )}
                                 </div>
+
+                                {/* Download Button */}
+                                <button 
+                                    onClick={handleDownloadAll}
+                                    disabled={completedCount === 0}
+                                    className="flex-1 h-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium flex flex-col items-center justify-center gap-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <DownloadIcon className="w-5 h-5" /> 
+                                    <span className="text-xs">Download</span>
+                                </button>
+
+                                {/* Style Button */}
+                                <button 
+                                    onClick={() => setShowStyleConfig(!showStyleConfig)}
+                                    className={`flex-1 h-full rounded-xl border font-medium flex flex-col items-center justify-center gap-1 transition-all ${
+                                        showStyleConfig 
+                                        ? 'bg-zinc-200 dark:bg-zinc-700 border-zinc-400 dark:border-zinc-600 text-zinc-900 dark:text-zinc-100' 
+                                        : 'bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                                    }`}
+                                >
+                                    <Type className="w-5 h-5" />
+                                    <span className="text-xs">Style</span>
+                                </button>
                             </div>
                             
                             {/* Token & Cost Estimator Pill */}
