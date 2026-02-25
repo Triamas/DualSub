@@ -709,6 +709,29 @@ Comment: 0,0:00:00.00,0:00:00.00,Primary,,0,0,0,,metadata: DualSub AI Generation
              // Single Line: replace [br] with space
              return processed.split('[br]').join(' ');
         }
+        
+        // Multi-line optimization:
+        // If we have exactly 2 line breaks (3 lines), check if we can merge them into 2 lines
+        // by replacing one [br] with a space, provided the resulting line isn't too long.
+        const parts = processed.split('[br]');
+        if (parts.length === 3) {
+            // Try merging line 1+2
+            const merge12 = parts[0] + ' ' + parts[1];
+            // Try merging line 2+3
+            const merge23 = parts[1] + ' ' + parts[2];
+            
+            // Simple heuristic: if merged line is < 50 chars (approx), it's safe to merge
+            // This avoids short 3-line subtitles like:
+            // "Hello[br]my name is[br]John" -> "Hello my name is[br]John"
+            const MAX_LINE_CHARS = 50;
+            
+            if (merge12.length <= MAX_LINE_CHARS) {
+                return `${merge12}\\N${parts[2]}`;
+            } else if (merge23.length <= MAX_LINE_CHARS) {
+                return `${parts[0]}\\N${merge23}`;
+            }
+        }
+
         // Multi-line: replace [br] with \N
         return processed.split('[br]').join('\\N');
     };
