@@ -1,9 +1,10 @@
 import React from 'react';
-import { Palette, Layout, ArrowUp, ArrowDown, Type, Eye } from 'lucide-react';
+import { Palette, Layout, ArrowUp, ArrowDown, Type, Eye, Save } from 'lucide-react';
 import { AssStyleConfig } from '../types';
-import { STYLE_PRESETS } from '../services/subtitleUtils';
+import { STYLE_PRESETS, savePreset } from '../services/subtitleUtils';
 import { KODI_FONTS } from '../constants';
 import { VisualPreview } from './VisualPreview';
+import { useToast } from './Toast';
 
 interface StyleEditorProps {
     config: AssStyleConfig;
@@ -32,6 +33,8 @@ export const StyleEditor = React.memo<StyleEditorProps>(({
 }) => {
     // Local state for immediate preview updates
     const [localConfig, setLocalConfig] = React.useState(config);
+    const [activePreset, setActivePreset] = React.useState<string | null>('DEFAULT');
+    const { addToast } = useToast();
     
     // Sync local state when prop changes (e.g. reset or preset applied)
     React.useEffect(() => {
@@ -52,6 +55,23 @@ export const StyleEditor = React.memo<StyleEditorProps>(({
         setLocalConfig(newConfig);
     };
 
+    const handlePresetClick = (name: string) => {
+        setActivePreset(name);
+        onApplyPreset(name as any);
+    };
+
+    const handleSavePreset = () => {
+        if (activePreset) {
+            savePreset(activePreset, localConfig);
+            addToast(`Saved changes to ${activePreset} preset`, 'success');
+        }
+    };
+
+    const handleReset = () => {
+        onReset();
+        setActivePreset('DEFAULT');
+    };
+
     return (
         <>
             {isOpen && (
@@ -66,13 +86,28 @@ export const StyleEditor = React.memo<StyleEditorProps>(({
                         {Object.keys(STYLE_PRESETS).map(name => (
                             <button 
                                 key={name} 
-                                onClick={() => onApplyPreset(name as any)} 
-                                className="px-3 py-1.5 text-xs font-bold rounded-full bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-700 hover:border-yellow-500 dark:hover:border-yellow-500 transition-all"
+                                onClick={() => handlePresetClick(name)} 
+                                className={`px-3 py-1.5 text-xs font-bold rounded-full border transition-all ${
+                                    activePreset === name 
+                                    ? 'bg-zinc-100 dark:bg-zinc-700 border-yellow-500 text-zinc-900 dark:text-white shadow-sm' 
+                                    : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-700 hover:border-yellow-500 dark:hover:border-yellow-500'
+                                }`}
                             >
                                 {name}
                             </button>
                         ))}
-                        <button onClick={onReset} className="ml-2 px-3 py-1.5 text-xs font-bold rounded-full text-red-500 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900 hover:bg-red-100 dark:hover:bg-red-900/20">Reset</button>
+                        <div className="flex items-center gap-2 ml-2 pl-2 border-l border-zinc-200 dark:border-zinc-700">
+                            {activePreset && (
+                                <button 
+                                    onClick={handleSavePreset}
+                                    className="px-3 py-1.5 text-xs font-bold rounded-full text-blue-600 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-900 hover:bg-blue-100 dark:hover:bg-blue-900/20 flex items-center gap-1"
+                                    title={`Save current settings to ${activePreset}`}
+                                >
+                                    <Save className="w-3 h-3" /> Save
+                                </button>
+                            )}
+                            <button onClick={handleReset} className="px-3 py-1.5 text-xs font-bold rounded-full text-red-500 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-900 hover:bg-red-100 dark:hover:bg-red-900/20">Reset</button>
+                        </div>
                     </div>
                     
                     <div className="p-6 space-y-8">

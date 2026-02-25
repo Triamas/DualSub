@@ -900,3 +900,37 @@ export const STYLE_PRESETS: { [key: string]: AssStyleConfig } = {
         linesPerSubtitle: 2
     }
 };
+
+const PRESETS_STORAGE_KEY = 'dualsub_style_presets';
+
+export const loadPresets = () => {
+    try {
+        const saved = localStorage.getItem(PRESETS_STORAGE_KEY);
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            Object.assign(STYLE_PRESETS, parsed);
+        }
+    } catch (e) {
+        console.error('Failed to load presets:', e);
+    }
+};
+
+export const savePreset = (name: string, config: AssStyleConfig) => {
+    if (!STYLE_PRESETS[name]) return;
+    
+    // Update in-memory
+    STYLE_PRESETS[name] = { ...config };
+    
+    // Persist only the overrides/customizations
+    // We save the entire current state of presets to be safe and simple
+    try {
+        localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(STYLE_PRESETS));
+    } catch (e) {
+        console.error('Failed to save preset:', e);
+    }
+};
+
+// Initialize presets on load
+if (typeof window !== 'undefined') {
+    loadPresets();
+}
