@@ -93,9 +93,19 @@ export const ModelSettings: React.FC<ModelSettingsProps> = ({
 
                         {/* Provider Specific Settings */}
                         {config.provider === 'gemini' && (
-                        <div className="space-y-2">
-                            <label htmlFor="gemini-model-select" className="text-xs font-semibold uppercase text-zinc-500">Model</label>
-                            <select id="gemini-model-select" aria-label="Gemini model" value={config.modelName} onChange={(e) => onConfigChange({...config, modelName: e.target.value})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500">{AVAILABLE_MODELS.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select>
+                        <div className="space-y-3">
+                            <div>
+                                <label htmlFor="gemini-model-select" className="text-xs font-semibold uppercase text-zinc-500 mb-1 block">Model</label>
+                                <select id="gemini-model-select" aria-label="Gemini model" value={config.modelName} onChange={(e) => onConfigChange({...config, modelName: e.target.value})} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-3 py-2 text-sm outline-none focus:border-yellow-500">{AVAILABLE_MODELS.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select>
+                            </div>
+                            <div>
+                                <label htmlFor="gemini-api-key" className="text-xs font-semibold uppercase text-zinc-500 mb-1 block">API Key (Optional)</label>
+                                <div className="flex gap-2">
+                                    <div className="bg-zinc-200 dark:bg-zinc-700 p-2 rounded text-zinc-500"><Settings2 className="w-4 h-4"/></div>
+                                    <input id="gemini-api-key" aria-label="Gemini API Key" type="password" value={config.apiKey || ''} onChange={(e) => onConfigChange({...config, apiKey: e.target.value})} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded px-3 py-2 text-sm font-mono outline-none focus:border-yellow-500" placeholder="Use default or enter custom key..." />
+                                </div>
+                                <p className="text-[10px] text-zinc-500 mt-1">Leave empty to use the system default key.</p>
+                            </div>
                         </div>
                         )}
 

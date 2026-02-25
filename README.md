@@ -26,6 +26,7 @@ DualSub AI is a professional-grade web application for creating dual-language su
 - **History**: Local search history with quick-access tag cloud.
 
 ### 🎨 Professional Styling
+- **Style Editor**: Dedicated "Style" button to toggle the visual editor.
 - **Formats**: Export to rich **ASS (Advanced Substation Alpha)** or standard **SRT**.
 - **Visual Preview**: Real-time rendering preview of fonts, colors, and shadows.
 - **Presets**: One-click styles for **Netflix**, **Anime**, **Cinematic**, and **Kodi**.
@@ -53,7 +54,7 @@ DualSub AI is a professional-grade web application for creating dual-language su
 3.  **Environment Setup**
     Create a `.env` file in the root directory:
     ```env
-    # Required for Gemini translation features
+    # Default Gemini API Key (Optional if you plan to set it in UI)
     API_KEY=your_google_genai_api_key_here
     ```
 
@@ -63,16 +64,18 @@ DualSub AI is a professional-grade web application for creating dual-language su
     ```
     Access the app at `http://localhost:5173`.
 
-### Using Local LLMs (Ollama / LM Studio)
+### Configuration
 
-1.  Start your local inference server (e.g., `ollama serve`).
-2.  In DualSub AI, click the **Settings (Cog Icon)**.
-3.  Switch Provider to **Local LLM**.
-4.  Set the endpoint (default: `http://127.0.0.1:11434/v1/chat/completions` for Ollama).
+- **Gemini API Key**: You can set a default key in `.env` or provide a custom key directly in the **Model Settings** (Cog Icon) > **Gemini** provider settings. The UI key overrides the environment variable.
+- **Local LLMs**: Switch Provider to **Local LLM** in settings and point to your local inference server (e.g., `http://127.0.0.1:11434/v1/chat/completions`).
 
 ## Architecture
 
-- **Frontend**: React 19, TypeScript, Vite.
+- **Frontend**: React 18, TypeScript, Vite.
+- **Performance**: 
+  - **Web Workers**: Heavy subtitle parsing and merging logic runs off the main thread.
+  - **Virtualization**: Efficient rendering of large subtitle lists using `react-virtuoso`.
+  - **Optimized Bundle**: Code splitting for fast load times.
 - **UI**: Tailwind CSS, Lucide Icons.
 - **State/Storage**: IndexedDB (for session & metadata caching).
 - **AI/Logic**: Google GenAI SDK, Custom DP algorithms for subtitle alignment.

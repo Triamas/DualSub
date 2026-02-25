@@ -2,10 +2,10 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { SubtitleLine, ModelConfig } from "../types";
 
-const getClient = () => {
-    const apiKey = process.env.API_KEY;
+const getClient = (customKey?: string) => {
+    const apiKey = customKey || process.env.API_KEY;
     if (!apiKey) {
-      throw new Error("API Key not found. Please ensure process.env.API_KEY is set.");
+      throw new Error("API Key not found. Please ensure process.env.API_KEY is set or provide a custom key.");
     }
     return new GoogleGenAI({ apiKey });
 };
@@ -269,7 +269,7 @@ const queryAI = async (
     }
 
     // 4. Gemini (Cloud)
-    const ai = getClient();
+    const ai = getClient(config.apiKey);
     try {
         // 45 Seconds Hard Timeout for Gemini API calls
         const response = await callWithTimeout<GenerateContentResponse>(ai.models.generateContent({
